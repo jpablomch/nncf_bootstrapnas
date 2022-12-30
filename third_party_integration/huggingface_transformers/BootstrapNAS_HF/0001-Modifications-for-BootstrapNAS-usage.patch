@@ -1,4 +1,4 @@
-From 2fda2a7a6bb8dac775f8651d79176219d0bb2bc1 Mon Sep 17 00:00:00 2001
+From 4112c8fbe73464aff52c1e4e53ae3ccf87e11a30 Mon Sep 17 00:00:00 2001
 From: "J. Pablo Munoz" <pablo.munoz@intel.com>
 Date: Wed, 30 Nov 2022 17:00:14 -0800
 Subject: [PATCH] Enable BootstrapNAS
@@ -15,7 +15,7 @@ Subject: [PATCH] Enable BootstrapNAS
  .../nncf_bootstrapnas_bert_config_squad.json  |  69 +++++++++
  .../nncf_bootstrapnas_bert_config_xnli.json   |  65 ++++++++
  src/transformers/__init__.py                  |   4 +-
- src/transformers/modeling_utils.py            |  20 +++
+ src/transformers/modeling_utils.py            |  27 ++++
  src/transformers/models/bert/modeling_bert.py |   4 +-
  .../models/roberta/modeling_roberta.py        |   4 +-
  src/transformers/optimization.py              |  36 ++++-
@@ -23,12 +23,14 @@ Subject: [PATCH] Enable BootstrapNAS
  src/transformers/trainer.py                   | 146 +++++++++++++++---
  src/transformers/trainer_callback.py          |   6 +
  src/transformers/training_args.py             |  58 ++++++-
- src/transformers/utils/__init__.py            |   1 +
- 20 files changed, 879 insertions(+), 98 deletions(-)
+ src/transformers/utils/__init__.py            |   2 +
+ src/transformers/utils/bnas_utils.py          |  97 ++++++++++++
+ 21 files changed, 984 insertions(+), 98 deletions(-)
  create mode 100644 nncf_bootstrapnas_config/nncf_bootstrapnas_bert_config_conll.json
  create mode 100644 nncf_bootstrapnas_config/nncf_bootstrapnas_bert_config_mrpc.json
  create mode 100644 nncf_bootstrapnas_config/nncf_bootstrapnas_bert_config_squad.json
  create mode 100644 nncf_bootstrapnas_config/nncf_bootstrapnas_bert_config_xnli.json
+ create mode 100644 src/transformers/utils/bnas_utils.py
 
 diff --git a/examples/pytorch/language-modeling/run_clm.py b/examples/pytorch/language-modeling/run_clm.py
 index fe03cde7c..7f694f118 100755
@@ -1109,7 +1111,7 @@ index ba24b9886..c1d73c6d4 100755
      from .training_args_tf import TFTrainingArguments
  
 diff --git a/src/transformers/modeling_utils.py b/src/transformers/modeling_utils.py
-index 5f4fccd33..468335b48 100644
+index 5f4fccd33..3bee3521e 100644
 --- a/src/transformers/modeling_utils.py
 +++ b/src/transformers/modeling_utils.py
 @@ -27,6 +27,9 @@ from functools import partial
@@ -1122,7 +1124,15 @@ index 5f4fccd33..468335b48 100644
  from packaging import version
  from torch import Tensor, device, nn
  from torch.nn import CrossEntropyLoss
-@@ -1497,6 +1500,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+@@ -59,6 +62,7 @@ from .utils import (
+     ContextManagers,
+     ModelOutput,
+     PushToHubMixin,
++    WeightsFlopsCalculatorForTransformer,
+     cached_file,
+     copy_func,
+     download_url,
+@@ -1497,6 +1501,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
          push_to_hub: bool = False,
          max_shard_size: Union[int, str] = "10GB",
          safe_serialization: bool = False,
@@ -1130,7 +1140,7 @@ index 5f4fccd33..468335b48 100644
          **kwargs,
      ):
          """
-@@ -1901,6 +1905,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+@@ -1901,6 +1906,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
          load_in_8bit_skip_modules = kwargs.pop("load_in_8bit_skip_modules", None)
          subfolder = kwargs.pop("subfolder", "")
          commit_hash = kwargs.pop("_commit_hash", None)
@@ -1139,7 +1149,7 @@ index 5f4fccd33..468335b48 100644
  
          if trust_remote_code is True:
              logger.warning(
-@@ -2321,6 +2327,13 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+@@ -2321,6 +2328,16 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
              if dtype_orig is not None:
                  torch.set_default_dtype(dtype_orig)
  
@@ -1148,12 +1158,15 @@ index 5f4fccd33..468335b48 100644
 +                algo_name = nncf_config.get('bootstrapNAS', {}).get('training', {}).get('algorithm', 'progressive_shrinking')
 +                compression_ctrl, model = create_compressed_model_from_algo_names(nncf_network, nncf_config,
 +                                                                                  algo_names=[algo_name])
++                compression_ctrl.multi_elasticity_handler._weights_calc = WeightsFlopsCalculatorForTransformer(
++                                                                            config.num_attention_heads,
++                                                                          )
 +                return compression_ctrl, model
 +
              model, missing_keys, unexpected_keys, mismatched_keys, error_msgs = cls._load_pretrained_model(
                  model,
                  state_dict,
-@@ -2344,6 +2357,13 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+@@ -2344,6 +2361,16 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
          # Set model in evaluation mode to deactivate DropOut modules by default
          model.eval()
  
@@ -1162,6 +1175,9 @@ index 5f4fccd33..468335b48 100644
 +            algo_name = nncf_config.get('bootstrapNAS', {}).get('training', {}).get('algorithm', 'progressive_shrinking')
 +            compression_ctrl, model = create_compressed_model_from_algo_names(nncf_network, nncf_config,
 +                                                                              algo_names=[algo_name])
++            compression_ctrl.multi_elasticity_handler._weights_calc = WeightsFlopsCalculatorForTransformer(
++                                                                            config.num_attention_heads,
++                                                                      )
 +            return compression_ctrl, model
 +
          # Dispatch model with hooks on all devices if necessary
@@ -1775,10 +1791,18 @@ index 170315fe2..9e7df17fc 100644
 +    training_args.lr_scheduler_type = args.lr_scheduler_type
 +    training_args.max_steps = -1
 diff --git a/src/transformers/utils/__init__.py b/src/transformers/utils/__init__.py
-index 2269f2254..2e5b3fa1c 100644
+index 2269f2254..4aa93202a 100644
 --- a/src/transformers/utils/__init__.py
 +++ b/src/transformers/utils/__init__.py
-@@ -163,6 +163,7 @@ FLAX_WEIGHTS_INDEX_NAME = "flax_model.msgpack.index.json"
+@@ -22,6 +22,7 @@
+ from packaging import version
+ 
+ from .. import __version__
++from .bnas_utils import WeightsFlopsCalculatorForTransformer
+ from .constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD, IMAGENET_STANDARD_MEAN, IMAGENET_STANDARD_STD
+ from .doc import (
+     add_code_sample_docstrings,
+@@ -163,6 +164,7 @@ FLAX_WEIGHTS_INDEX_NAME = "flax_model.msgpack.index.json"
  SAFE_WEIGHTS_NAME = "model.safetensors"
  SAFE_WEIGHTS_INDEX_NAME = "model.safetensors.index.json"
  CONFIG_NAME = "config.json"
@@ -1786,6 +1810,109 @@ index 2269f2254..2e5b3fa1c 100644
  FEATURE_EXTRACTOR_NAME = "preprocessor_config.json"
  MODEL_CARD_NAME = "modelcard.json"
  
+diff --git a/src/transformers/utils/bnas_utils.py b/src/transformers/utils/bnas_utils.py
+new file mode 100644
+index 000000000..4631890b5
+--- /dev/null
++++ b/src/transformers/utils/bnas_utils.py
+@@ -0,0 +1,97 @@
++"""
++ Copyright (c) 2022 Intel Corporation
++ Licensed under the Apache License, Version 2.0 (the "License");
++ you may not use this file except in compliance with the License.
++ You may obtain a copy of the License at
++      http://www.apache.org/licenses/LICENSE-2.0
++ Unless required by applicable law or agreed to in writing, software
++ distributed under the License is distributed on an "AS IS" BASIS,
++ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ See the License for the specific language governing permissions and
++ limitations under the License.
++"""
++
++from typing import Dict
++from typing import List
++from typing import Tuple
++
++from nncf.common.graph import NNCFGraph
++from nncf.common.graph import NNCFNodeName
++from nncf.common.graph.operator_metatypes import OperatorMetatype
++from nncf.torch.graph.operator_metatypes import PTLinearMetatype
++from nncf.torch.graph.operator_metatypes import PTMatMulMetatype
++from nncf.common.pruning.weights_flops_calculator import WeightsFlopsCalculator
++
++
++class WeightsFlopsCalculatorForTransformer(WeightsFlopsCalculator):
++    """
++    Collection of weight and flops calculation functions.
++    Class instance keeps only parameters that are constant during
++    compression algorithms execution.
++    """
++
++    def __init__(self,
++                 n_heads: int,
++                 linear_op_metatypes: List[OperatorMetatype] = [PTLinearMetatype],
++                 matmul_op_metatypes: List[OperatorMetatype] = [PTMatMulMetatype]):
++        """
++        Constructor.
++
++        :param n_heads: number of attention heads.
++        :param linear_op_metatypes: List of metatypes defining linear/fully connected operations.
++        :param matmul_op_metatypes: List of metatypes defining matmul operations.
++        """
++        super().__init__([], linear_op_metatypes)
++        self._n_heads = n_heads
++        self._matmul_op_metatype = matmul_op_metatypes
++
++    def count_flops_and_weights_per_node(self,
++                                         graph: NNCFGraph,
++                                         output_shapes: Dict[NNCFNodeName, int],
++                                         input_channels: Dict[NNCFNodeName, int] = None,
++                                         output_channels: Dict[NNCFNodeName, int] = None,
++                                         kernel_sizes: Dict[NNCFNodeName, Tuple[int, int]] = None,
++                                         op_addresses_to_skip: List[NNCFNodeName] = None) -> \
++        Tuple[Dict[NNCFNodeName, int], Dict[NNCFNodeName, int]]:
++        """
++        Counts the number of weights and FLOPs per node in the model for convolution and fully connected layers.
++
++        :param graph: NNCFGraph.
++        :param output_shapes: Dictionary of output dimension shapes for convolutions and
++            fully connected layers. E.g {node_name: (height, width)}
++        :param input_channels: Dictionary of input channels number in convolutions.
++            If not specified, taken from the graph. {node_name: channels_num}
++        :param output_channels: Dictionary of output channels number in convolutions.
++            If not specified, taken from the graph. {node_name: channels_num}
++        :param kernel_sizes: Dictionary of kernel sizes in convolutions.
++            If not specified, taken from the graph. {node_name: kernel_size}.
++            It's only supposed to be used in NAS in case of Elastic Kernel enabled.
++        :param op_addresses_to_skip: List of operation addresses of layers that should be skipped from calculation.
++            It's only supposed to be used in NAS in case of Elastic Depth enabled.
++        :return Dictionary of FLOPs number {node_name: flops_num}
++                Dictionary of weights number {node_name: weights_num}
++        """
++        input_channels = input_channels or {}
++        output_channels = output_channels or {}
++        kernel_sizes = kernel_sizes or {}
++        op_addresses_to_skip = op_addresses_to_skip or []
++
++        flops, weights = super().count_flops_and_weights_per_node(graph, output_shapes, input_channels, output_channels,
++                                                                  kernel_sizes, op_addresses_to_skip)
++
++        for node in graph.get_nodes_by_metatypes(self._matmul_op_metatype):
++            name = node.node_name
++            if name in op_addresses_to_skip:
++                continue
++
++            # get previous qkv nodes
++            input_nodes = graph.get_previous_nodes(node)
++            while(len(input_nodes) > 0 and input_nodes[0].node_type != 'linear'):
++                input_nodes = graph.get_previous_nodes(input_nodes[0])
++            qkv_len = output_shapes[input_nodes[0].node_name][1]
++            qkv_head_dim = output_channels[input_nodes[0].node_name] // self._n_heads
++
++            flops[name] = 2 * self._n_heads * qkv_len * qkv_len * qkv_head_dim
++            weights[name] = 0
++
++        return flops, weights
 -- 
 2.17.1
 
