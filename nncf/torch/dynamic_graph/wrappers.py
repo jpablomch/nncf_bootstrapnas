@@ -79,7 +79,7 @@ def wrap_operator(operator, operator_info: 'PatchedOperatorInfo'):
     # do not wrap function twice
     _orig_op = getattr(operator, '_original_op', None)
     if _orig_op is not None:
-        nncf_logger.debug("Operator: {} is already wrapped".format(_orig_op.__name__))
+        nncf_logger.debug(f"Operator: {_orig_op.__name__} is already wrapped")
         return operator
 
     def wrapped(*args, **kwargs):
@@ -190,7 +190,9 @@ def _execute_op(op_address: 'OperationAddress',
         node = ctx.find_operator_node(tensor_metas, op_address)
         if node is None:
             layer_attrs, ignored_algos = _collect_module_attrs_and_ignored_algorithms(ctx, op_name)
-            node = ctx.maybe_add_node(processed_input, tensor_metas, op_address, layer_attrs, ignored_algos)
+            is_called_inside_nncf_module = isinstance(ctx.get_current_module(), _NNCFModuleMixin)
+            node = ctx.maybe_add_node(processed_input, tensor_metas, op_address,
+                                      layer_attrs, ignored_algos, is_called_inside_nncf_module)
         if is_debug() and node is not None:
             ctx.register_node_call(node)
 
