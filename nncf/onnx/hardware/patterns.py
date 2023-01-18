@@ -1,5 +1,5 @@
 """
- Copyright (c) 2022 Intel Corporation
+ Copyright (c) 2023 Intel Corporation
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -14,11 +14,11 @@
 from nncf.common.graph.definitions import NNCFGraphNodeType
 from nncf.common.graph.patterns import GraphPattern
 
-from nncf.experimental.onnx.graph.metatypes.onnx_metatypes import ONNXSigmoidMetatype
-from nncf.experimental.onnx.graph.metatypes.onnx_metatypes import ONNXHardSigmoidMetatype
-from nncf.experimental.onnx.graph.metatypes.onnx_metatypes import ONNXAddLayerMetatype
-from nncf.experimental.onnx.graph.metatypes.onnx_metatypes import ONNXSubMetatype
-from nncf.experimental.onnx.graph.metatypes.onnx_metatypes import ONNXMulLayerMetatype
+from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXSigmoidMetatype
+from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXHardSigmoidMetatype
+from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXAddLayerMetatype
+from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXSubMetatype
+from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXMulLayerMetatype
 
 
 def create_swish_activation() -> GraphPattern:

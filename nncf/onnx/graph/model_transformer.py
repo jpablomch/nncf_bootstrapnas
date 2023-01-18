@@ -1,5 +1,5 @@
 """
- Copyright (c) 2022 Intel Corporation
+ Copyright (c) 2023 Intel Corporation
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -21,12 +21,12 @@ from nncf.common.graph.graph import NNCFGraph
 from nncf.common.graph.transformations.commands import TargetType
 from nncf.common.graph.transformations.layout import TransformationLayout
 from nncf.common.graph.definitions import NNCFGraphNodeType
-from nncf.experimental.onnx.graph.onnx_graph import ONNXGraph
-from nncf.experimental.onnx.graph.transformations.commands import ONNXBiasCorrectionCommand
-from nncf.experimental.onnx.graph.transformations.commands import ONNXModelExtractionCommand
-from nncf.experimental.onnx.graph.transformations.commands import ONNXOutputInsertionCommand
-from nncf.experimental.onnx.graph.transformations.commands import ONNXQuantizerInsertionCommand
-from nncf.experimental.onnx.graph.transformations.commands import ONNXNodeRemovingCommand
+from nncf.onnx.graph.onnx_graph import ONNXGraph
+from nncf.onnx.graph.transformations.commands import ONNXBiasCorrectionCommand
+from nncf.onnx.graph.transformations.commands import ONNXModelExtractionCommand
+from nncf.onnx.graph.transformations.commands import ONNXOutputInsertionCommand
+from nncf.onnx.graph.transformations.commands import ONNXQuantizerInsertionCommand
+from nncf.onnx.graph.transformations.commands import ONNXQDQNodeRemovingCommand
 from nncf.common.factory import NNCFGraphFactory
 from nncf.common.graph.model_transformer import ModelTransformer
 
@@ -52,7 +52,7 @@ class ONNXModelTransformer(ModelTransformer):
         quantizer_insert_transformations = []
         output_insert_transformations = []
         bias_correction_transformations = []
-        node_removing_transformations = []
+        qdq_node_removing_transformations = []
         model_extraction_transformation = None
 
         transformations = transformation_layout.transformations
@@ -66,8 +66,8 @@ class ONNXModelTransformer(ModelTransformer):
                 bias_correction_transformations.append(transformation)
             elif isinstance(transformation, ONNXModelExtractionCommand):
                 model_extraction_transformation = transformation
-            elif isinstance(transformation, ONNXNodeRemovingCommand):
-                node_removing_transformations.append(transformation)
+            elif isinstance(transformation, ONNXQDQNodeRemovingCommand):
+                qdq_node_removing_transformations.append(transformation)
 
         if quantizer_insert_transformations:
             self._apply_quantizer_insertion_transformations(quantizer_insert_transformations)
@@ -77,8 +77,8 @@ class ONNXModelTransformer(ModelTransformer):
             self._apply_bias_correction_transformations(bias_correction_transformations)
         if model_extraction_transformation:
             self._model = self._apply_model_extraction_transformation(model_extraction_transformation)
-        if node_removing_transformations:
-            self._apply_node_removing_transformation(node_removing_transformations)
+        if qdq_node_removing_transformations:
+            self._apply_qdq_node_removing_transformation(qdq_node_removing_transformations)
 
         return self._model
 
@@ -193,7 +193,6 @@ class ONNXModelTransformer(ModelTransformer):
 
         :param transformations: lisf of the TransformationCommand transformations
         """
-        # TODO: optimize: could be insertion of quantizers done in one operations
         self._added_target_edges = Counter()
         onnx_graph = ONNXGraph(self._model)
         for transformation in transformations:
@@ -346,7 +345,7 @@ class ONNXModelTransformer(ModelTransformer):
         onnx_model_exctactor = onnx.utils.Extractor(self._model)
         return onnx_model_exctactor.extract_model(transformation.inputs, transformation.outputs)
 
-    def _apply_node_removing_transformation(self, transformations: List[ONNXNodeRemovingCommand]) -> None:
+    def _apply_qdq_node_removing_transformation(self, transformations: List[ONNXQDQNodeRemovingCommand]) -> None:
         """
         Removes the layers from the model.
 

@@ -1,5 +1,5 @@
 """
- Copyright (c) 2022 Intel Corporation
+ Copyright (c) 2023 Intel Corporation
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -18,7 +18,7 @@ from nncf.common.graph.transformations.commands import Command, TransformationCo
 from nncf.common.graph.transformations.commands import TransformationType
 from nncf.common.graph.transformations.commands import TargetType
 from nncf.common.graph.transformations.commands import TargetPoint
-from nncf.experimental.onnx.quantization.quantizer_parameters import ONNXQuantizerLayerParameters
+from nncf.onnx.quantization.quantizer_parameters import ONNXQuantizerLayerParameters
 
 
 class ONNXTargetPoint(TargetPoint):
@@ -105,9 +105,9 @@ class ONNXModelExtractionCommand(Command):
         # Have a look at nncf/torch/graph/transformations/commands/PTInsertionCommand
         raise NotImplementedError()
 
-class ONNXNodeRemovingCommand(TransformationCommand):
+class ONNXQDQNodeRemovingCommand(TransformationCommand):
     """
-    Removes nodes from the model.
+    Removes Quantizer or Dequantizer nodes from the model.
     """
 
     def __init__(self, target_point: ONNXTargetPoint):

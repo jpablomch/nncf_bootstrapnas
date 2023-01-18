@@ -1,5 +1,5 @@
 """
- Copyright (c) 2022 Intel Corporation
+ Copyright (c) 2023 Intel Corporation
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -22,9 +22,9 @@ from nncf.common.graph.transformations.commands import TargetType
 from nncf.common.graph.transformations.layout import TransformationLayout
 from nncf.common.tensor_statistics.aggregator import StatisticPointsContainer
 from nncf.common.tensor_statistics.aggregator import StatisticsAggregator
-from nncf.experimental.onnx.graph.onnx_graph import ONNXGraph
-from nncf.experimental.onnx.graph.transformations.commands import ONNXOutputInsertionCommand
-from nncf.experimental.onnx.tensor import ONNXNNCFTensor
+from nncf.onnx.graph.onnx_graph import ONNXGraph
+from nncf.onnx.graph.transformations.commands import ONNXOutputInsertionCommand
+from nncf.onnx.tensor import ONNXNNCFTensor
 
 
 class ONNXStatisticsAggregator(StatisticsAggregator):

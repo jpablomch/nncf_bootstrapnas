@@ -1,5 +1,5 @@
 """
- Copyright (c) 2022 Intel Corporation
+ Copyright (c) 2023 Intel Corporation
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -106,7 +106,7 @@ class ONNXLinearMetatype(ONNXOpWithWeightsMetatype):
     name = 'LinearOp'
     op_names = ['Gemm']
     hw_config_names = [HWConfigOpName.MATMUL]
-    # TODO(kshpv): Update weight_port_id to None and detects it dynamically
+    # TODO(kshpv): ticket:95156
     weight_definitions = OpWeightDef(weight_channel_axis=0, weight_port_id=1, bias_port_id=2)
 
 
@@ -260,7 +260,6 @@ class ONNXShapeMetatype(ONNXOpMetatype):
 
 @ONNX_OPERATION_METATYPES.register()
 class ONNXExpandMetatype(ONNXOpMetatype):
-    # TODO (kshpv): hw_config_names?
     name = 'ExpandOp'
     op_names = ['Expand']
 

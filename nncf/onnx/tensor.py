@@ -1,5 +1,5 @@
 """
- Copyright (c) 2022 Intel Corporation
+ Copyright (c) 2023 Intel Corporation
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -10,3 +10,20 @@
  See the License for the specific language governing permissions and
  limitations under the License.
 """
+
+import numpy as np
+
+from nncf.common.tensor import NNCFTensor
+
+
+class ONNXNNCFTensor(NNCFTensor):
+    """
+    A realisation of ONNX tensors wrapper for common NNCF algorithms.
+    """
+
+    def __init__(self, tensor: np.ndarray):
+        super().__init__(tensor)
+
+    @property
+    def device(self):
+        return 'CPU'
