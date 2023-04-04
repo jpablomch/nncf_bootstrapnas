@@ -105,7 +105,7 @@ def test_init_params_for_flops_calculation(model, ref_params):
         (PruningTestModelSharedConvs, False, 0.4, 461438976, 275300352, [384, 768]),
         (GroupedConvolutionModel, False, 0.0, 11243520, 11243520, []),
         (PruningTestModelConcatWithLinear, False, 0.1, 305792, 230912, [16, 24, 24]),
-        (partial(MobilenetV3BlockSEReshape, mode='linear'), False, 0.1, 21360, 3532, [1, 1]),
+        (partial(MobilenetV3BlockSEReshape, mode='linear'), False, 0.1, 21360, 3042, [1, 1]),
         (PruningTestBatchedLinear, False, 0.0, 77824, 77824, []),
         (PruningTestModelBroadcastedLinear, False, 0.1, 137216, 103424, [16, 24]),
         (PruningTestModelDiffChInPruningCluster, False, 0.1, 1962368, 982336, [8]),
