@@ -154,7 +154,7 @@ class AdvancedQuantizationParameters:
     inplace_statistics: bool = True
     disable_channel_alignment: bool = True
     disable_bias_correction: bool = False
-    smooth_quant_alpha: float = -1.0
+    smooth_quant_alpha: float = 0.95
 
     # Advanced Quantization parameters
     activations_quantization_params: QuantizationParameters = field(default_factory=QuantizationParameters)
@@ -227,9 +227,10 @@ def convert_to_dict_recursively(params: Any) -> Dict[str, Any]:
         value = getattr(params, f.name)
         if is_dataclass(value):
             result[f.name] = convert_to_dict_recursively(value)
-        if isinstance(value, Enum):
+        elif isinstance(value, Enum):
             result[f.name] = value.value
-        result[f.name] = value
+        else:
+            result[f.name] = value
 
     return result
 
@@ -299,7 +300,7 @@ def convert_range_estimator_parameters_to_dict(params: RangeEstimatorParameters)
     ):
         return {}
     else:
-        raise RuntimeError("The following range estimator parameters are not supported: " f"{str(params)}")
+        raise RuntimeError(f"The following range estimator parameters are not supported: {str(params)}")
 
     return result
 
