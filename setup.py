@@ -105,7 +105,7 @@ INSTALL_REQUIRES = [
     "texttable>=1.6.3",
     "scipy>=1.3.2, <1.11",
     "networkx>=2.6, <=2.8.2",  # see ticket 94048 or https://github.com/networkx/networkx/issues/5962
-    "numpy>=1.19.1, <1.24",
+    "numpy>=1.19.1, <1.25",
     # The recent pyparsing major version update seems to break
     # integration with networkx - the graphs parsed from current .dot
     # reference files no longer match against the graphs produced in tests.
@@ -121,14 +121,14 @@ INSTALL_REQUIRES = [
     "natsort>=7.1.0",
     "pandas>=1.1.5,<2.1",
     "scikit-learn>=0.24.0",
-    "openvino-telemetry",
+    "openvino-telemetry>=2023.1.0",
     "psutil",
 ]
 
 
 TF_EXTRAS = [
-    "tensorflow~=2.11.1",
-    # The workaround of the protobuf issue and should be fixed with migration on TF 2.12
+    "tensorflow~=2.12.0",
+    # This is required for support of TF 2.8.4 which needs protobuf<=3.19.6
     "tensorflow-metadata<=1.13.0",
 ]
 

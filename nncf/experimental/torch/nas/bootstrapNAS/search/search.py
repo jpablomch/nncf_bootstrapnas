@@ -31,6 +31,7 @@ from torch.utils.tensorboard import SummaryWriter
 from nncf import NNCFConfig
 from nncf.common.initialization.batchnorm_adaptation import BatchnormAdaptationAlgorithm
 from nncf.common.logging import nncf_logger
+from nncf.common.plotting import noninteractive_plotting
 from nncf.common.utils.decorators import skip_if_dependency_unavailable
 from nncf.common.utils.os import safe_open
 from nncf.config.extractors import get_bn_adapt_algo_kwargs
@@ -290,7 +291,7 @@ class SearchAlgorithm(BaseSearchAlgorithm):
 
         self._problem = None
         self.checkpoint_save_dir = None
-        self.type_var = np.int
+        self.type_var = int
 
     @property
     def evaluator_handlers(self) -> List[BaseEvaluatorHandler]:
