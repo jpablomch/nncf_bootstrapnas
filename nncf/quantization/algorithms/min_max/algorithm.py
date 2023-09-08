@@ -414,13 +414,8 @@ class MinMaxQuantization(Algorithm):
         :param model: Model in the original framework.
         :param nncf_graph: The built NNCFGraph of the model.
         """
-        node_name = quantization_point.insertion_point.target_node_name
-        node = nncf_graph.get_node_by_name(node_name)
-        weights_port_ids = self._backend_entity.get_weight_tensor_port_ids(node)
-        for port_id in weights_port_ids:
-            weight_quantization_target_point = self._backend_entity.target_point(
-                TargetType.OPERATION_WITH_WEIGHTS, node_name, port_id
-            )
+        weight_quantization_target_points = self._get_weight_quantization_target_points(quantization_point, nncf_graph)
+        for weight_quantization_target_point in weight_quantization_target_points:
             self._quantization_target_points_to_qconfig[weight_quantization_target_point] = quantization_point.qconfig
 
     def _add_activation_quantization_target_point(self, quantization_point: SingleConfigQuantizationPoint) -> None:
@@ -433,13 +428,32 @@ class MinMaxQuantization(Algorithm):
         activation_quantization_target_point = self._get_activation_quantization_target_point(quantization_point)
         self._quantization_target_points_to_qconfig[activation_quantization_target_point] = quantization_point.qconfig
 
+    def _get_weight_quantization_target_points(
+        self, quantization_point: SingleConfigQuantizationPoint, nncf_graph: NNCFGraph
+    ) -> List[SingleConfigQuantizationPoint]:
+        """
+        Returns weight quantization target points to the set of existing points.
+
+        :param quantization_point: SingleConfigQuantizationPoint for the needed layer.
+        :param nncf_graph: NNCFGraph instance for working with the graph and nodes.
+        :return: List of SingleConfigQuantizationPoints for the needed layer.
+        """
+        weight_quantization_target_points = []
+        node_name = quantization_point.insertion_point.target_node_name
+        node = nncf_graph.get_node_by_name(node_name)
+        weights_port_ids = self._backend_entity.get_weight_tensor_port_ids(node)
+        for port_id in weights_port_ids:
+            weight_quantization_target_points.append(
+                self._backend_entity.target_point(TargetType.OPERATION_WITH_WEIGHTS, node_name, port_id)
+            )
+        return weight_quantization_target_points
+
     def _get_activation_quantization_target_point(
         self, quantization_point: SingleConfigQuantizationPoint
     ) -> SingleConfigQuantizationPoint:
         """
         Returns activation quantization target point to the set of existing points.
 
-        :param nncf_graph: NNCFGraph instance for working with the graph and nodes.
         :param quantization_point: SingleConfigQuantizationPoint for the needed layer.
         :return: SingleConfigQuantizationPoint for the needed layer.
         """
@@ -489,7 +503,7 @@ class MinMaxQuantization(Algorithm):
         quantizer_setup = self._get_quantizer_setup(nncf_graph, inference_nncf_graph, hw_patterns, ignored_patterns)
         self._apply_model_type_pass(self._model_type, quantizer_setup, nncf_graph)
         self._apply_device_pass(self._target_device, quantizer_setup, inference_nncf_graph)
-        self._unified_scale_groups = self._collect_unified_groups(quantizer_setup)
+        self._unified_scale_groups = self._collect_unified_groups(quantizer_setup, nncf_graph)
         quantization_points = list(quantizer_setup.quantization_points.values())
         quantization_points = self._topological_sort_quantization_points(quantization_points, nncf_graph)
         for quantization_point in quantization_points:
@@ -501,11 +515,14 @@ class MinMaxQuantization(Algorithm):
                 raise RuntimeError("Incorrect quantization point")
         return self._quantization_target_points_to_qconfig, self._unified_scale_groups
 
-    def _collect_unified_groups(self, quantizer_setup: SingleConfigQuantizerSetup) -> List[List[TargetPoint]]:
+    def _collect_unified_groups(
+        self, quantizer_setup: SingleConfigQuantizerSetup, nncf_graph: NNCFGraph
+    ) -> List[List[TargetPoint]]:
         """
         Collects the group of quantizers for unification.
 
         :param quantizer_setup: SingleConfigQuantizerSetup instance.
+        :param nncf_graph: NNCFGraph instance.
         :return: List with the groups of the TargetPoints.
         """
         unified_scale_groups = []
@@ -519,7 +536,9 @@ class MinMaxQuantization(Algorithm):
                     activation_target_point = self._get_activation_quantization_target_point(quantization_point)
                     unified_scale_group.append(activation_target_point)
                 else:
-                    raise RuntimeError("Only activation quantizers can be unified.")
+                    weight_target_points = self._get_weight_quantization_target_points(quantization_point, nncf_graph)
+                    for weight_target_point in weight_target_points:
+                        unified_scale_group.append(weight_target_point)
             unified_scale_groups.append(unified_scale_group)
         return unified_scale_groups
 
@@ -628,7 +647,10 @@ class MinMaxQuantization(Algorithm):
                 for tensor_collector in statistic_points.get_algo_statistics_for_node(
                     target_node_name, filter_func, self._algorithm_key
                 ):
-                    group_statistics.append(tensor_collector.get_statistics())
+                    statistics = tensor_collector.get_statistics()
+                    if statistics.min_values is None or statistics.max_values is None:
+                        raise RuntimeError(f"Statistics were not collected for the node {target_node_name}")
+                    group_statistics.append(statistics)
 
             unified_values = self._backend_entity.unify_statistics(group_statistics)
             for quantization_target_point in unified_scale_group:
@@ -661,6 +683,8 @@ class MinMaxQuantization(Algorithm):
                 half_range = quantization_target_point in quantization_points_overflow_fix
                 narrow_range = get_quantizer_narrow_range(qconfig, quant_group)
                 statistics = tensor_collector.get_statistics()
+                if statistics.min_values is None or statistics.max_values is None:
+                    raise RuntimeError(f"Statistics were not collected for the node {target_node_name}")
                 parameters = calculate_quantizer_parameters(statistics, qconfig, quant_group, narrow_range, half_range)
                 command = self._backend_entity.create_quantizer_insertion_command(
                     graph, quantization_target_point, qconfig, parameters

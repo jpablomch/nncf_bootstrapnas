@@ -147,16 +147,18 @@ class OVModelExtractionCommand(Command):
         raise NotImplementedError()
 
 
-class OVNullBiasInsertionCommand(TransformationCommand):
+class OVBiasInsertionCommand(TransformationCommand):
     """
-    Inserts null bias for the corresponding node.
+    Inserts bias for the corresponding node.
     """
 
-    def __init__(self, target_point: OVTargetPoint):
+    def __init__(self, target_point: OVTargetPoint, bias_value: np.ndarray):
         """
         :param target_point: The TargetPoint instance for the insertion that contains layer's information.
+        :param bias_value: Constant value for the bias layer.
         """
         super().__init__(TransformationType.INSERT, target_point)
+        self.bias_value = bias_value
 
     def union(self, other: "TransformationCommand") -> "TransformationCommand":
         # Have a look at nncf/torch/graph/transformations/commands/PTInsertionCommand
@@ -168,13 +170,23 @@ class OVMultiplyInsertionCommand(OVInsertionCommand):
     Inserts Multiply nodes before the corresponding nodes.
     """
 
-    def __init__(self, target_point: OVTargetPoint, scale_value: np.ndarray, destination_node_names: List[str]):
+    def __init__(
+        self,
+        target_point: OVTargetPoint,
+        scale_value: np.ndarray,
+        destination_node_names: List[str],
+        multiply_node_name: str,
+    ):
         """
         :param target_point: The TargetPoint instance for the insertion that contains layer's information.
+        :param scale_value: Scale value for Multiply layer.
+        :param destination_node_names: New layer consumers.
+        :param multiply_node_name: New layer name.
         """
         super().__init__(target_point)
         self.scale_value = scale_value
         self.destination_node_names = destination_node_names
+        self.multiply_node_name = multiply_node_name
 
     def union(self, other: "TransformationCommand") -> "TransformationCommand":
         # Have a look at nncf/torch/graph/transformations/commands/PTInsertionCommand

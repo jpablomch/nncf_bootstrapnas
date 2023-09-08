@@ -28,11 +28,11 @@ from nncf.openvino.graph.node_utils import get_inplace_min_op
 from nncf.openvino.graph.node_utils import get_ov_model_reduce_node_name
 from nncf.openvino.graph.node_utils import get_result_node_name
 from nncf.openvino.graph.transformations.commands import OVBiasCorrectionCommand
+from nncf.openvino.graph.transformations.commands import OVBiasInsertionCommand
 from nncf.openvino.graph.transformations.commands import OVFQNodeRemovingCommand
 from nncf.openvino.graph.transformations.commands import OVInplaceFnInsertionCommand
 from nncf.openvino.graph.transformations.commands import OVModelExtractionCommand
 from nncf.openvino.graph.transformations.commands import OVMultiplyInsertionCommand
-from nncf.openvino.graph.transformations.commands import OVNullBiasInsertionCommand
 from nncf.openvino.graph.transformations.commands import OVOutputInsertionCommand
 from nncf.openvino.graph.transformations.commands import OVQuantizerInsertionCommand
 from nncf.openvino.graph.transformations.commands import OVTargetPoint
@@ -56,9 +56,12 @@ TARGET_POST_LAYER_FQS = [["Add/fq_output_0"], ["MatMul/fq_output_0"], ["Add/fq_o
 TARGET_WEIGHTS_FQS = [["Add/fq_weights_1"], ["MatMul/fq_weights_1"], ["Add/fq_weights_1", "MatMul/fq_weights_1"]]
 
 
-def create_transformed_model(model, target_layers, target_type, command_type, port_id=0, **kwargs):
+def create_transformed_model(model, target_layers, target_type, command_type, port_id=0, command_kwargs=None):
     transformation_layout = TransformationLayout()
-    for target_layer in target_layers:
+    command_kwargs = command_kwargs or {}
+    if isinstance(command_kwargs, dict):
+        command_kwargs = [command_kwargs] * len(target_layers)
+    for target_layer, kwargs in zip(target_layers, command_kwargs):
         target_point = OVTargetPoint(target_type, target_layer, port_id=port_id)
         command = command_type(target_point, **kwargs)
         transformation_layout.register(command)
@@ -126,7 +129,7 @@ INPLACE_OPS_TEST_CASES = [
         "abs_max", None, lambda o, r: get_inplace_max_op(o, r, True), ["Abs", "ReduceMax"], [None, (0, 1, 2, 3)]
     ),
     # Batch mean and mean per ch operations
-    InplaceOpTestCase("batch_mean", None, lambda o, r: get_inplace_batch_mean_op(o), ["ReduceMean"], [(0,)]),
+    InplaceOpTestCase("batch_mean", None, lambda o, r: get_inplace_batch_mean_op(o), ["ReduceMean"], [0]),
     InplaceOpTestCase("mean_per_ch", 1, get_inplace_mean_per_ch, ["Reshape", "ReduceMean"], [(1, 3, 16), (0, 2)]),
     InplaceOpTestCase(
         "mean_per_ch",
@@ -135,7 +138,21 @@ INPLACE_OPS_TEST_CASES = [
         ["Transpose", "Reshape", "ReduceMean"],
         [(0, 2, 1, 3), (1, 4, 12), (0, 2)],
     ),
-    InplaceOpTestCase("mean_per_ch", 0, get_inplace_mean_per_ch, ["ReduceMean"], [(0,)], dims="SHORT"),
+    InplaceOpTestCase(
+        "mean_per_ch",
+        0,
+        get_inplace_mean_per_ch,
+        ["ReduceMean"],
+        [
+            0,
+        ],
+        dims="SHORT",
+    ),
+    # EmptyCase
+    InplaceOpTestCase("min", (), get_inplace_min_op, ["ReduceMin"], [()]),
+    InplaceOpTestCase("mean", (), get_inplace_mean_op, ["ReduceMean"], [()]),
+    InplaceOpTestCase("max", (), lambda o, r: get_inplace_max_op(o, r, False), ["ReduceMax"], [()]),
+    InplaceOpTestCase("abs_max", (), lambda o, r: get_inplace_max_op(o, r, True), ["Abs", "ReduceMax"], [None, ()]),
 ]
 
 
@@ -164,9 +181,12 @@ def check_inplace_op(target_node, ref_types, ref_vals, inplace_branches_num, out
             const = get_prev_node(node, 1)
             if ref_val == []:
                 assert const.get_data().shape == (0,)
+            elif not isinstance(ref_val, tuple):
+                assert const.get_data() == ref_val
             else:
                 res = np.equal(const.get_data(), np.array(ref_val))
                 assert all(res)
+                assert const.get_data().shape == np.array(ref_val).shape
 
         nodes = get_next_nodes(node, 0)
         assert len(nodes) == 1
@@ -187,9 +207,11 @@ def test_inplace_fn_insertion(test_params: InplaceOpTestCase, target_type, targe
         target_layers,
         target_type,
         OVInplaceFnInsertionCommand,
-        port_id=port_id,
-        inplace_op_fn=test_params.op_builder(test_params.name, test_params.reduce_shape),
-        fn_output_port_id=0,
+        port_id,
+        {
+            "inplace_op_fn": test_params.op_builder(test_params.name, test_params.reduce_shape),
+            "fn_output_port_id": 0,
+        },
     )
 
     inplace_branches_num = 1
@@ -238,9 +260,11 @@ def test_split_inplace_fn_insertion(test_params: InplaceOpTestCase):
         [target_layer],
         TargetType.POST_LAYER_OPERATION,
         OVInplaceFnInsertionCommand,
-        port_id=port_id,
-        inplace_op_fn=test_params.op_builder(test_params.name, test_params.reduce_shape),
-        fn_output_port_id=0,
+        port_id,
+        {
+            "inplace_op_fn": test_params.op_builder(test_params.name, test_params.reduce_shape),
+            "fn_output_port_id": 0,
+        },
     )
 
     target_node = get_node_by_name(transformed_model, target_layer)
@@ -284,9 +308,11 @@ def test_inplace_reduce_fn_zero_rank_output(reduction_shape):
         [target_layer],
         TargetType.OPERATION_WITH_WEIGHTS,
         OVInplaceFnInsertionCommand,
-        port_id=port_id,
-        inplace_op_fn=get_inplace_min_op(name, reduction_shape=reduction_shape),
-        fn_output_port_id=0,
+        port_id,
+        {
+            "inplace_op_fn": get_inplace_min_op(name, reduction_shape=reduction_shape),
+            "fn_output_port_id": 0,
+        },
     )
     target_node = get_prev_node(get_node_by_name(transformed_model, target_layer), 1)
     check_inplace_op(target_node, ["ReduceMin"], [[]], 1, 0)
@@ -337,9 +363,7 @@ def test_inplace_mean_per_ch_fn_dynamic_shapes(test_params: InplaceOpTestCase, i
 def test_output_insertion(target_type, target_layers):
     model = LinearModel().ov_model
     port_id = 1 if target_type == TargetType.OPERATION_WITH_WEIGHTS else 0
-    transformed_model = create_transformed_model(
-        model, target_layers, target_type, OVOutputInsertionCommand, port_id=port_id
-    )
+    transformed_model = create_transformed_model(model, target_layers, target_type, OVOutputInsertionCommand, port_id)
 
     if target_type == TargetType.PRE_LAYER_OPERATION:
         target_layers = ["Reshape"]
@@ -369,7 +393,7 @@ def test_split_output_insertion(test_params: InplaceOpTestCase):
     target_layer = "Split"
     port_id = 1
     transformed_model = create_transformed_model(
-        model, [target_layer], TargetType.POST_LAYER_OPERATION, OVOutputInsertionCommand, port_id=port_id
+        model, [target_layer], TargetType.POST_LAYER_OPERATION, OVOutputInsertionCommand, port_id
     )
 
     target_node = get_node_by_name(transformed_model, target_layer)
@@ -414,7 +438,7 @@ def test_fq_insertion_pre_layer(target_layers, ref_fq_names):
         target_layers,
         TargetType.PRE_LAYER_OPERATION,
         OVQuantizerInsertionCommand,
-        quantizer_parameters=quantizer_parameters,
+        command_kwargs={"quantizer_parameters": quantizer_parameters},
     )
     fq_nodes = get_fq_nodes(transformed_model)
 
@@ -435,7 +459,7 @@ def test_fq_insertion_post_layer(target_layers, ref_fq_names):
         target_layers,
         TargetType.POST_LAYER_OPERATION,
         OVQuantizerInsertionCommand,
-        quantizer_parameters=quantizer_parameters,
+        command_kwargs={"quantizer_parameters": quantizer_parameters},
     )
     fq_nodes = get_fq_nodes(transformed_model)
 
@@ -456,8 +480,8 @@ def test_fq_insertion_weights(target_layers, ref_fq_names):
         target_layers,
         TargetType.OPERATION_WITH_WEIGHTS,
         OVQuantizerInsertionCommand,
-        port_id=1,
-        quantizer_parameters=quantizer_parameters,
+        1,
+        {"quantizer_parameters": quantizer_parameters},
     )
     fq_nodes = get_fq_nodes(transformed_model)
 
@@ -490,7 +514,7 @@ def test_bias_correction(model_with_parameters):
     refs = model_with_parameters["refs"]
 
     transformed_model = create_transformed_model(
-        model, layers, TargetType.LAYER, OVBiasCorrectionCommand, port_id=1, **{"bias_value": values}
+        model, layers, TargetType.LAYER, OVBiasCorrectionCommand, 1, {"bias_value": values}
     )
     ops_dict = {op.get_friendly_name(): op for op in transformed_model.get_ops()}
 
@@ -528,8 +552,8 @@ def test_no_transformations():
 
 
 MODELS_WITH_PARAMETERS = [
-    {"model": ConvNotBiasModel().ov_model, "layers": ["Conv"]},
-    {"model": WeightsModel().ov_model, "layers": ["Conv", "Conv_backprop"]},
+    {"model": ConvNotBiasModel().ov_model, "layers": [["Conv"], [(1, 3, 1, 1)]]},
+    {"model": WeightsModel().ov_model, "layers": [["Conv", "Conv_backprop"], [(1, 3, 1, 1), (1, 3, 1, 1)]]},
 ]
 
 
@@ -538,10 +562,17 @@ def test_null_biases_insertion(model_with_parameters):
     model = model_with_parameters["model"]
     layers = model_with_parameters["layers"]
 
-    transformed_model = create_transformed_model(model, layers, TargetType.LAYER, OVNullBiasInsertionCommand, port_id=0)
+    transformed_model = create_transformed_model(
+        model,
+        layers[0],
+        TargetType.LAYER,
+        OVBiasInsertionCommand,
+        port_id=0,
+        command_kwargs=[{"bias_value": np.zeros(shape, dtype=np.int8)} for shape in layers[1]],
+    )
     ops_dict = {op.get_friendly_name(): op for op in transformed_model.get_ops()}
 
-    for layer_name in layers:
+    for layer_name in layers[0]:
         node = ops_dict[layer_name]
         layer_shape = ops_dict[layer_name].shape
         bias_dtype = node.get_element_type().to_dtype()
@@ -609,7 +640,7 @@ def test_multiply_insertion(model_with_parameters):
         TargetType.POST_LAYER_OPERATION,
         OVMultiplyInsertionCommand,
         port_id=output_port_id,
-        **{"scale_value": scale, "destination_node_names": dest_nodes},
+        command_kwargs={"scale_value": scale, "destination_node_names": dest_nodes, "multiply_node_name": "test_name"},
     )
     ops_dict = {op.get_friendly_name(): op for op in transformed_model.get_ops()}
 

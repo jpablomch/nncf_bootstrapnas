@@ -9,7 +9,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from collections import Counter
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import onnx
 
@@ -21,17 +21,14 @@ from nncf.common.graph.layer_attributes import BaseLayerAttributes
 from nncf.common.graph.layer_attributes import Dtype
 from nncf.common.graph.operator_metatypes import InputNoopMetatype
 from nncf.common.graph.operator_metatypes import OutputNoopMetatype
-from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXConstantMetatype
-from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXDequantizeLinearMetatype
+from nncf.onnx.graph.metatypes.groups import CONSTANT_WEIGHT_LAYER_METATYPES
+from nncf.onnx.graph.metatypes.groups import MATMUL_METATYPES
+from nncf.onnx.graph.metatypes.groups import OPERATIONS_WITH_BIAS
 from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXGemmMetatype
-from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXIdentityMetatype
-from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXQuantizeLinearMetatype
-from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXReshapeMetatype
-from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXTransposeMetatype
-from nncf.onnx.graph.metatypes.onnx_metatypes import get_bias_tensor_port_id
-from nncf.onnx.graph.metatypes.onnx_metatypes import get_constant_weight_port_ids
+from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXOpMetatype
+from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXOpWithWeightsMetatype
 from nncf.onnx.graph.metatypes.onnx_metatypes import get_metatype
-from nncf.onnx.graph.metatypes.onnx_metatypes import get_possible_weight_port_ids
+from nncf.onnx.graph.metatypes.onnx_metatypes import get_tensor_edge_name
 from nncf.onnx.graph.onnx_graph import ONNXGraph
 
 
@@ -69,44 +66,40 @@ class ONNXLayerAttributes(BaseLayerAttributes):
         return bool(self.node_attrs)
 
 
-def _get_tensor_edge_name(onnx_graph: ONNXGraph, node: onnx.NodeProto, port_id: int) -> Optional[str]:
+def get_constant_weight_port_ids(metatype: ONNXOpMetatype) -> List[int]:
     """
-    Returns an edge name associated with a weight of a node laying on  an input port_id.
+    Returns port ids on which metatype must have a weight based on Operation definition.
 
-    Checks whether a node has a tensor on input port_id.
-    If does then it is a weight and returns corresponding edge name.
-    If not - take a parent node into this port id and does the same check for it.
-
-    If an edge with a weight was not found then returns None.
-
-    METATYPES THAT COULD CONSUME A WEIGHT TENSOR:
-        ONNXConstantMetatype
-        ONNXIdentityMetatype
-        ONNXReshapeMetatype
-        ONNXTransposeMetatype
-        ONNXQuantizeLinearMetatype
-
-    :param onnx_graph: ONNXGraph.
-    :param node: Node.
-    :param port_id: Port id on which a weight edge is seeking.
-    :return: Edge name associated with a weight.
+    :param metatype: Metatype.
+    :return: Port ids.
     """
-    PROPAGATING_NODES = (
-        ONNXIdentityMetatype.get_all_aliases()
-        + ONNXTransposeMetatype.get_all_aliases()
-        + ONNXQuantizeLinearMetatype.get_all_aliases()
-        + ONNXReshapeMetatype.get_all_aliases()
-        + ONNXDequantizeLinearMetatype.get_all_aliases()
-    )
-    END_NODES = ONNXConstantMetatype.get_all_aliases()
-    parent = onnx_graph.get_parent(node, port_id)
-    if not parent:
-        if onnx_graph.has_tensor(node.input[port_id]):
-            return node.input[port_id]
-    elif parent.op_type in END_NODES:
-        return node.input[port_id]
-    elif parent.op_type in PROPAGATING_NODES:
-        return _get_tensor_edge_name(onnx_graph, parent, 0)
+    if metatype in CONSTANT_WEIGHT_LAYER_METATYPES:
+        return metatype.weight_port_ids
+    return []
+
+
+def get_possible_weight_port_ids(metatype: ONNXOpMetatype) -> List[int]:
+    """
+    Returns weight port ids on which metatype could have a weight.
+    Example: ONNXMatMulMetatype could have activations or weights on input port ids: 0, 1
+
+    :param metatype: Metatype.
+    :return: Port ids.
+    """
+    if metatype in MATMUL_METATYPES:
+        return metatype.possible_weight_ports
+    return []
+
+
+def get_bias_tensor_port_id(metatype: ONNXOpWithWeightsMetatype) -> Optional[int]:
+    """
+    Returns input port id, where a bias tensor should output.
+
+    :param node: Node, for which input port id is returned,
+    :return: Input port id, where a weight bias should output or None if node can not have bias.
+    """
+    if metatype in OPERATIONS_WITH_BIAS:
+        return metatype.bias_port_id
     return None
 
 
@@ -126,7 +119,7 @@ def _get_weight_port_ids(node: onnx.NodeProto, onnx_graph: ONNXGraph) -> Set[int
     port_ids.update(constant_port_ids)
     possible_port_ids = get_possible_weight_port_ids(metatype)
     for port_id in possible_port_ids:
-        if _get_tensor_edge_name(onnx_graph, node, port_id):
+        if get_tensor_edge_name(onnx_graph, node, port_id):
             port_ids.add(port_id)
     return port_ids
 
@@ -204,7 +197,7 @@ def _get_bias_attr(node: onnx.NodeProto, onnx_graph: ONNXGraph) -> Dict[str, str
     metatype = get_metatype(onnx_graph.onnx_model, node)
     if _is_node_with_bias(node, onnx_graph.onnx_model):
         bias_tensor_port_id = get_bias_tensor_port_id(metatype)
-        bias_edge_name = _get_tensor_edge_name(onnx_graph, node, bias_tensor_port_id)
+        bias_edge_name = get_tensor_edge_name(onnx_graph, node, bias_tensor_port_id)
         bias_attrs["name"] = bias_edge_name
     return bias_attrs
 

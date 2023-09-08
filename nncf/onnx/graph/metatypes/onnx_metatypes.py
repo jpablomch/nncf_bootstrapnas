@@ -16,6 +16,7 @@ import onnx
 from nncf.common.graph.operator_metatypes import OperatorMetatype
 from nncf.common.graph.operator_metatypes import OperatorMetatypeRegistry
 from nncf.common.hardware.opset import HWConfigOpName
+from nncf.onnx.graph.onnx_graph import ONNXGraph
 
 ONNX_OPERATION_METATYPES = OperatorMetatypeRegistry("onnx_operator_metatypes")
 
@@ -392,6 +393,18 @@ class ONNXReciprocalMetatype(ONNXOpMetatype):
 
 
 @ONNX_OPERATION_METATYPES.register()
+class ONNXEmbeddingMetatype(ONNXOpMetatype):
+    name = "EmbeddingOp"
+    hw_config_names = [HWConfigOpName.EMBEDDING]
+    weight_port_ids = [0]
+    weight_channel_axis = 0
+
+    @classmethod
+    def matches(cls, model: onnx.ModelProto, node: onnx.NodeProto) -> bool:
+        return _is_embedding(model, node)
+
+
+@ONNX_OPERATION_METATYPES.register()
 class ONNXLogMetatype(ONNXOpMetatype):
     name = "LogOp"
     op_names = ["Log"]
@@ -431,6 +444,7 @@ class ONNXRoiAlignMetatype(ONNXOpMetatype):
 class ONNXGatherMetatype(ONNXOpMetatype):
     name = "GatherOp"
     op_names = ["Gather"]
+    subtypes = [ONNXEmbeddingMetatype]
 
 
 @ONNX_OPERATION_METATYPES.register()
@@ -596,23 +610,6 @@ class ONNXDeformableConvolutionMetatype(ONNXOpMetatype):
     op_names = ["DeformConv"]
 
 
-CONSTANT_WEIGHT_LAYER_METATYPES = [
-    ONNXConvolutionMetatype,
-    ONNXDepthwiseConvolutionMetatype,
-    ONNXConvolutionTransposeMetatype,
-]
-
-MATMUL_METATYPES = [ONNXGemmMetatype, ONNXMatMulMetatype]
-
-GENERAL_WEIGHT_LAYER_METATYPES = CONSTANT_WEIGHT_LAYER_METATYPES + MATMUL_METATYPES
-
-# Contains the operation metatypes for which bias can be applied.
-OPERATIONS_WITH_BIAS_METATYPES = [
-    ONNXConvolutionMetatype,
-    ONNXDepthwiseConvolutionMetatype,
-]
-
-
 def get_operator_metatypes() -> List[Type[OperatorMetatype]]:
     """
     Returns a list of the operator metatypes.
@@ -638,40 +635,44 @@ def get_metatype(model: onnx.ModelProto, node: onnx.NodeProto) -> ONNXOpMetatype
     return metatype
 
 
-def get_constant_weight_port_ids(metatype: ONNXOpMetatype) -> List[int]:
+def get_tensor_edge_name(onnx_graph: ONNXGraph, node: onnx.NodeProto, port_id: int) -> Optional[str]:
     """
-    Returns port ids on which metatype must have a weight based on Operation definition.
+    Returns an edge name associated with a weight of a node laying on  an input port_id.
 
-    :param metatype: Metatype.
-    :return: Port ids.
+    Checks whether a node has a tensor on input port_id.
+    If does then it is a weight and returns corresponding edge name.
+    If not - take a parent node into this port id and does the same check for it.
+
+    If an edge with a weight was not found then returns None.
+
+    METATYPES THAT COULD CONSUME A WEIGHT TENSOR:
+        ONNXConstantMetatype
+        ONNXIdentityMetatype
+        ONNXReshapeMetatype
+        ONNXTransposeMetatype
+        ONNXQuantizeLinearMetatype
+
+    :param onnx_graph: ONNXGraph.
+    :param node: Node.
+    :param port_id: Port id on which a weight edge is seeking.
+    :return: Edge name associated with a weight.
     """
-    if metatype in CONSTANT_WEIGHT_LAYER_METATYPES:
-        return metatype.weight_port_ids
-    return []
-
-
-def get_possible_weight_port_ids(metatype: ONNXOpMetatype) -> List[int]:
-    """
-    Returns weight port ids on which metatype could have a weight.
-    Example: ONNXMatMulMetatype could have activations or weights on input port ids: 0, 1
-
-    :param metatype: Metatype.
-    :return: Port ids.
-    """
-    if metatype in MATMUL_METATYPES:
-        return metatype.possible_weight_ports
-    return []
-
-
-def get_bias_tensor_port_id(metatype: ONNXOpWithWeightsMetatype) -> Optional[int]:
-    """
-    Returns input port id, where a bias tensor should output.
-
-    :param node: Node, for which input port id is returned,
-    :return: Input port id, where a weight bias should output or None if node can not have bias.
-    """
-    if metatype in OPERATIONS_WITH_BIAS_METATYPES:
-        return metatype.bias_port_id
+    PROPAGATING_NODES = (
+        ONNXIdentityMetatype.get_all_aliases()
+        + ONNXTransposeMetatype.get_all_aliases()
+        + ONNXQuantizeLinearMetatype.get_all_aliases()
+        + ONNXReshapeMetatype.get_all_aliases()
+        + ONNXDequantizeLinearMetatype.get_all_aliases()
+    )
+    END_NODES = ONNXConstantMetatype.get_all_aliases()
+    parent = onnx_graph.get_parent(node, port_id)
+    if not parent:
+        if onnx_graph.has_tensor(node.input[port_id]):
+            return node.input[port_id]
+    elif parent.op_type in END_NODES:
+        return node.input[port_id]
+    elif parent.op_type in PROPAGATING_NODES:
+        return get_tensor_edge_name(onnx_graph, parent, 0)
     return None
 
 
@@ -708,4 +709,24 @@ def _is_depthwise_conv(model: onnx.ModelProto, node: onnx.NodeProto) -> bool:
         and conv_group == conv_in_channels
     ):
         return True
+    return False
+
+
+def _is_embedding(model: onnx.ModelProto, node: onnx.NodeProto) -> bool:
+    """
+    Returns True if the layer can be represented as embedding, False - otherwise.
+
+    :param model: ONNX model to get the node's weight.
+    :param node: Layer to check whether it is embedding.
+    :return: True if the layer is embedding, False - otherwise.
+    """
+    tensor_port_id = ONNXEmbeddingMetatype.weight_port_ids[0]
+    onnx_graph = ONNXGraph(model)
+    allowed_types_list = ["TensorProto.FLOAT"]
+    weight_edge_name = get_tensor_edge_name(onnx_graph, node, tensor_port_id)
+
+    if weight_edge_name is not None:
+        tensor_data_type = onnx_graph.get_tensor(weight_edge_name).data_type
+        if onnx.helper.tensor_dtype_to_string(tensor_data_type) in allowed_types_list:
+            return True
     return False

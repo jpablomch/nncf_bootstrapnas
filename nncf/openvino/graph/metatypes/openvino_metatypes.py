@@ -9,6 +9,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import deque
 from typing import List, Optional, Type
 
 import openvino.runtime as ov
@@ -17,6 +18,7 @@ from nncf.common.graph.operator_metatypes import INPUT_NOOP_METATYPES
 from nncf.common.graph.operator_metatypes import OUTPUT_NOOP_METATYPES
 from nncf.common.graph.operator_metatypes import OperatorMetatype
 from nncf.common.graph.operator_metatypes import OperatorMetatypeRegistry
+from nncf.common.graph.operator_metatypes import UnknownMetatype
 from nncf.common.hardware.opset import HWConfigOpName
 
 OV_OPERATOR_METATYPES = OperatorMetatypeRegistry("openvino_operator_metatypes")
@@ -404,6 +406,17 @@ class OVLogicalXorMetatype(OVOpMetatype):
 
 
 @OV_OPERATOR_METATYPES.register()
+class OVEmbeddingMetatype(OVOpMetatype):
+    name = "EmbeddingOp"
+    hw_config_names = [HWConfigOpName.EMBEDDING]
+    const_channel_axis = [0]
+
+    @classmethod
+    def matches(cls, node: ov.Node) -> bool:
+        return _is_embedding(node)
+
+
+@OV_OPERATOR_METATYPES.register()
 class OVFloorMetatype(OVOpMetatype):
     name = "FloorOp"
     op_names = ["Floor"]
@@ -460,6 +473,7 @@ class OVRoiAlignMetatype(OVOpMetatype):
 class OVGatherMetatype(OVOpMetatype):
     name = "GatherOp"
     op_names = ["Gather"]
+    subtypes = [OVEmbeddingMetatype]
 
 
 @OV_OPERATOR_METATYPES.register()
@@ -659,33 +673,46 @@ class OVAbsMetatype(OVOpMetatype):
     op_names = ["Abs"]
 
 
-GENERAL_WEIGHT_LAYER_METATYPES = [
-    OVConvolutionMetatype,
-    OVGroupConvolutionMetatype,
-    OVDepthwiseConvolutionMetatype,
-    OVConvolutionBackpropDataMetatype,
-    OVGroupConvolutionBackpropDataMetatype,
-    OVMatMulMetatype,
-    OVLSTMSequenceMetatype,
-    OVGRUSequenceMetatype,
-]
-
-METATYPES_WITH_CONST_PORT_ID = GENERAL_WEIGHT_LAYER_METATYPES + [OVAddMetatype]
-
-# Contains the operation metatypes for which bias can be applied.
-OPERATIONS_WITH_BIAS_METATYPES = [
-    OVConvolutionMetatype,
-    # TODO: add all metatypes with bias
-    OVMatMulMetatype,
-]
-
-
 def get_operator_metatypes() -> List[Type[OperatorMetatype]]:
     """
     Returns a list of the operator metatypes.
     :return: List of operator metatypes .
     """
     return list(OV_OPERATOR_METATYPES.registry_dict.values())
+
+
+def get_operation_const_op(operation: ov.Node, const_port_id: int) -> Optional[ov.Node]:
+    """
+    Returns constant node of given operation placed on given const port id.
+
+    :param operation: Given operation.
+    :param const_port_id: Given constant port id.
+    :returns: Constant node of given operation placed on given const port id.
+    """
+    node = operation.input_value(const_port_id).get_node()
+
+    # There are several cases here
+    # (Constant) -> (Operation)
+    # (Constant) -> (Convert) -> (Operation)
+    # (Constant) -> (Convert) -> (FakeQuantize) -> (Operation)
+    # (Constant) -> (Convert) -> (FakeQuantize) -> (Reshape) -> (Operation)
+    #  and etc. We need properly find the constant node. So we start with
+    # `node` and traverse up until the constant node is not found.
+    queue = deque([node])
+    constant_node = None
+    allowed_propagation_types_list = ["Convert", "FakeQuantize", "Reshape"]
+
+    while len(queue) != 0:
+        curr_node = queue.popleft()
+        if curr_node.get_type_name() == "Constant":
+            constant_node = curr_node
+            break
+        if len(curr_node.inputs()) == 0:
+            break
+        if curr_node.get_type_name() in allowed_propagation_types_list:
+            queue.append(curr_node.input_value(0).get_node())
+
+    return constant_node
 
 
 def _is_depthwise_conv(node: ov.Node) -> bool:
@@ -706,3 +733,38 @@ def _is_depthwise_conv(node: ov.Node) -> bool:
     inp_channels = inp_channels.get_length()
     groups = groups.get_length()
     return groups == inp_channels and inp_channels > 1
+
+
+def _is_embedding(node: ov.Node) -> bool:
+    """
+    Returns True if the layer can be represented as embedding, False - otherwise.
+
+    :param node: Layer to check whether it is embedding.
+    :return: True if the layer is embedding, False - otherwise.
+    """
+    allowed_types_list = ["f16", "f32", "f64"]
+    const_port_id = 0
+    input_tensor = node.input_value(const_port_id)
+    if input_tensor.get_element_type().get_type_name() in allowed_types_list:
+        const_node = get_operation_const_op(node, const_port_id)
+        if const_node is not None:
+            return True
+
+    return False
+
+
+def get_node_metatype(node: ov.Node) -> Type[OperatorMetatype]:
+    """
+    Determine NNCF meta type for OpenVINO node.
+
+    :param node: OpenVINO node.
+    :return: NNCF meta type which corresponds to OpenVINO node.
+    """
+    node_type = node.get_type_name()
+    metatype = OV_OPERATOR_METATYPES.get_operator_metatype_by_op_name(node_type)
+    if metatype is not UnknownMetatype:
+        if metatype.get_subtypes():
+            subtype = metatype.determine_subtype(node)
+            if subtype is not None:
+                metatype = subtype
+    return metatype
