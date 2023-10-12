@@ -188,7 +188,7 @@ class BaseSearchAlgorithm:
         checkpoint_save_dir: str,
         efficiency_evaluator: Optional[BaseEvaluator] = None,
         ref_acc: Optional[float] = 100,
-        tensorboard_writer: Optional[SummaryWriter] = None,
+        tensorboard_writer: Optional["SummaryWriter"] = None,  # noqa: F821
     ) -> Tuple[ElasticityController, SubnetConfig, Tuple[float, ...]]:
         """This method should implement how to run the search algorithm."""
 
@@ -370,7 +370,7 @@ class SearchAlgorithm(BaseSearchAlgorithm):
         checkpoint_save_dir: str,
         efficiency_evaluator: Optional[BaseEvaluator] = None,
         ref_acc: Optional[float] = 100,
-        tensorboard_writer: Optional[SummaryWriter] = None,
+        tensorboard_writer: Optional["SummaryWriter"] = None,  # noqa: F821
         evaluator_checkpoint=None,
     ) -> Tuple[ElasticityController, SubnetConfig, Tuple[float, ...]]:
         """
