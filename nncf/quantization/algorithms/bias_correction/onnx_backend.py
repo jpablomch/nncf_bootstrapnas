@@ -35,7 +35,6 @@ from nncf.onnx.tensor import ONNXNNCFTensor
 from nncf.quantization.algorithms.bias_correction.backend import BiasCorrectionAlgoBackend
 
 
-# pylint:disable=too-many-public-methods
 class ONNXBiasCorrectionAlgoBackend(BiasCorrectionAlgoBackend):
     @property
     def tensor_processor(self) -> ONNXNNCFCollectorTensorProcessor:
@@ -117,7 +116,3 @@ class ONNXBiasCorrectionAlgoBackend(BiasCorrectionAlgoBackend):
     @staticmethod
     def remove_fq_from_inputs(model: onnx.ModelProto, nncf_graph: NNCFGraph) -> onnx.ModelProto:
         return remove_fq_from_inputs(model, nncf_graph)
-
-    @staticmethod
-    def insert_null_biases(model: onnx.ModelProto, nncf_graph: NNCFGraph) -> onnx.ModelProto:
-        return model
