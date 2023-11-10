@@ -158,6 +158,7 @@ class LinearPruningOp(BasePruningOp):
         output_mask = node.attributes.get("output_mask", None)
         node.attributes["output_mask"] = output_mask
 
+
 class EmbeddingPruningOp(BasePruningOp):
     @classmethod
     def accept_pruned_input(cls, node: NNCFNode) -> bool:

@@ -50,6 +50,16 @@ TModel = TypeVar("TModel")
 ValFnType = Callable[[TModel, DataLoaderType], float]
 
 
+class FixIntegerRandomSampling(IntegerRandomSampling):
+    """
+    Wrapper for the IntegerRandomSampling with the fix for https://github.com/anyoptimization/pymoo/issues/388.
+    """
+
+    def _do(self, problem, n_samples, **kwargs):
+        n, (xl, xu) = problem.n_var, problem.bounds()
+        return np.column_stack([np.random.randint(xl[k], xu[k] + 1, size=(n_samples)) for k in range(n)])
+
+
 class EvolutionaryAlgorithms(Enum):
     NSGA2 = "NSGA2"
     RNSGA2 = "RNSGA2"
@@ -230,7 +240,7 @@ class SearchAlgorithm(BaseSearchAlgorithm):
         self._top1_accuracy_validation_fn = None
         self._val_loader = None
         self._algorithm_name = search_config["algorithm"]
-        sampling = IntegerRandomSampling()
+        sampling = FixIntegerRandomSampling()
         if self._algorithm_name == EvolutionaryAlgorithms.NSGA2.value:
             self._algorithm = NSGA2(
                 pop_size=self.search_params.population,
@@ -453,56 +463,57 @@ class SearchAlgorithm(BaseSearchAlgorithm):
         """
         import matplotlib.pyplot as plt
 
-        plt.figure()
-        colormap = plt.cm.get_cmap("viridis")
-        col = range(int(self.search_params.num_evals / self.search_params.population))
-        for i in range(0, len(self.search_records), self.search_params.population):
-            c = [col[int(i / self.search_params.population)]] * len(
-                self.search_records[i : i + self.search_params.population]
-            )
-            plt.scatter(
-                [abs(row[2]) for row in self.search_records][i : i + self.search_params.population],
-                [abs(row[4]) for row in self.search_records][i : i + self.search_params.population],
-                s=9,
-                c=c,
-                alpha=0.5,
-                marker="D",
-                cmap=colormap,
-            )
-        plt.scatter(
-            *tuple(abs(ev.input_model_value) for ev in self.evaluator_handlers),
-            marker="s",
-            s=120,
-            color="blue",
-            label="Input Model",
-            edgecolors="black",
-        )
-        if None not in self.best_vals:
-            plt.scatter(
-                *tuple(abs(val) for val in self.best_vals),
-                marker="o",
-                s=120,
-                color="yellow",
-                label="BootstrapNAS A",
-                edgecolors="black",
-                linewidth=2.5,
-            )
-        if self._algorithm_name == EvolutionaryAlgorithms.RNSGA2.value:
-            for point in self._algorithm.survival.ref_points:
+        with noninteractive_plotting():
+            plt.figure()
+            colormap = plt.cm.get_cmap("viridis")
+            col = range(int(self.search_params.num_evals / self.search_params.population))
+            for i in range(0, len(self.search_records), self.search_params.population):
+                c = [col[int(i / self.search_params.population)]] * len(
+                    self.search_records[i: i + self.search_params.population]
+                )
                 plt.scatter(
-                    point[0],
-                    point[1],
-                    marker="^",
-                    color="gray",
-                    label="Reference Points",
+                    [abs(row[2]) for row in self.search_records][i: i + self.search_params.population],
+                    [abs(row[4]) for row in self.search_records][i: i + self.search_params.population],
+                    s=9,
+                    c=c,
+                    alpha=0.5,
+                    marker="D",
+                    cmap=colormap,
+                )
+            plt.scatter(
+                *tuple(abs(ev.input_model_value) for ev in self.evaluator_handlers),
+                marker="s",
+                s=120,
+                color="blue",
+                label="Input Model",
+                edgecolors="black",
+            )
+            if None not in self.best_vals:
+                plt.scatter(
+                    *tuple(abs(val) for val in self.best_vals),
+                    marker="o",
+                    s=120,
+                    color="yellow",
+                    label="BootstrapNAS A",
                     edgecolors="black",
                     linewidth=2.5,
                 )
-        plt.legend()
-        plt.title(f"Search Progression ({self._algorithm_name})")
-        plt.xlabel(self.efficiency_evaluator_handler.name)
-        plt.ylabel(self.accuracy_evaluator_handler.name)
-        plt.savefig(f"{self._log_dir}/{filename}.png")
+            if self._algorithm_name == EvolutionaryAlgorithms.RNSGA2.value:
+                for point in self._algorithm.survival.ref_points:
+                    plt.scatter(
+                        point[0],
+                        point[1],
+                        marker="^",
+                        color="gray",
+                        label="Reference Points",
+                        edgecolors="black",
+                        linewidth=2.5,
+                    )
+            plt.legend()
+            plt.title(f"Search Progression ({self._algorithm_name})")
+            plt.xlabel(self.efficiency_evaluator_handler.name)
+            plt.ylabel(self.accuracy_evaluator_handler.name)
+            plt.savefig(f"{self._log_dir}/{filename}.png")
 
     def save_evaluators_state(self) -> NoReturn:
         """

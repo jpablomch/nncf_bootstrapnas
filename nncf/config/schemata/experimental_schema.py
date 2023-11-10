@@ -117,8 +117,20 @@ ELASTIC_WIDTH_SCHEMA = {
         "filter_importance": with_attributes(
             STRING,
             description="The type of filter importance metric. Can be"
-            " one of `L1`, `L2`, `geometric_median`."
+            " one of `L1`, `L2`, `geometric_median`, `external`."
             " `L2` by default.",
+        ),
+        "external_importance_path": with_attributes(
+            STRING,
+            description="Path to the custom external weight importance (PyTorch tensor) per node "
+            "that needs to weight reorder. Valid only when filter_importance "
+            "is `external`. The file should be loaded via the torch interface "
+            "torch.load(), represented as a dictionary. It maps NNCF node name "
+            "to importance tensor with the same shape as the weights in the node "
+            "module. For example, node `Model/NNCFLinear[fc1]/linear_0` has a "
+            "3x1 linear module with weight [0.2, 0.3, 0.9], and in the dict"
+            "{'Model/NNCFLinear[fc1]/linear_0': tensor([0.4, 0.01, 0.2])} represents "
+            "the corresponding weight importance.",
         ),
     },
     "additionalProperties": False,
@@ -150,10 +162,12 @@ ELASTICITY_SCHEMA = {
             "are available - [width, depth, kernel]",
         ),
         "ignored_scopes": with_attributes(
-            make_string_or_array_of_strings_schema(), description=IGNORED_SCOPES_DESCRIPTION
+            make_string_or_array_of_strings_schema(),
+            description=IGNORED_SCOPES_DESCRIPTION,
         ),
         "target_scopes": with_attributes(
-            make_string_or_array_of_strings_schema(), description=TARGET_SCOPES_DESCRIPTION
+            make_string_or_array_of_strings_schema(),
+            description=TARGET_SCOPES_DESCRIPTION,
         ),
     },
     "additionalProperties": False,
@@ -196,7 +210,8 @@ STAGE_DESCRIPTOR_SCHEMA = {
             "beginning of the stage",
         ),
         "bn_adapt": with_attributes(
-            BOOLEAN, description="if True, triggers batchnorm adaptation in the beginning of the stage"
+            BOOLEAN,
+            description="if True, triggers batchnorm adaptation in the beginning of the stage",
         ),
         "init_lr": with_attributes(
             NUMBER,
@@ -205,10 +220,12 @@ STAGE_DESCRIPTOR_SCHEMA = {
             "the beginning of the stage.",
         ),
         "epochs_lr": with_attributes(
-            NUMBER, description="Number of epochs to compute the adjustment of the learning rate."
+            NUMBER,
+            description="Number of epochs to compute the adjustment of the learning rate.",
         ),
         "sample_rate": with_attributes(
-            NUMBER, description="Number of iterations to activate the random subnet. Default value is 1."
+            NUMBER,
+            description="Number of iterations to activate the random subnet. Default value is 1.",
         ),
     },
     "description": "Defines a supernet training stage: how many epochs it takes, which elasticities with which "
@@ -262,7 +279,8 @@ BOOTSTRAP_NAS_TRAINING_SCHEMA = {
         "elasticity": ELASTICITY_SCHEMA,
         "lr_schedule": LR_SCHEDULE_SCHEMA,
         "train_steps": with_attributes(
-            NUMBER, description="Defines the number of samples used for each training epoch."
+            NUMBER,
+            description="Defines the number of samples used for each training epoch.",
         ),
     },
     "additionalProperties": False,
@@ -353,10 +371,12 @@ MOVEMENT_SPARSE_STRUCTURE_BY_SCOPES_SCHEMA = {
             enum=MOVEMENT_SPARSE_STRUCTURE_MODE,
         ),
         "sparse_factors": with_attributes(
-            ARRAY_OF_NUMBERS, description='The block shape for weights to sparsify. Required when `mode`="block".'
+            ARRAY_OF_NUMBERS,
+            description='The block shape for weights to sparsify. Required when `mode`="block".',
         ),
         "axis": with_attributes(
-            NUMBER, description='The dimension for weights to sparsify. Required when `mode`="per_dim".'
+            NUMBER,
+            description='The dimension for weights to sparsify. Required when `mode`="per_dim".',
         ),
         "target_scopes": with_attributes(
             make_string_or_array_of_strings_schema(),
@@ -371,7 +391,8 @@ MOVEMENT_SCHEDULER_PARAMS_SCHEMA = {
     "type": "object",
     "properties": {
         "warmup_start_epoch": with_attributes(
-            NUMBER, description="Index of the starting epoch (include) for warmup stage."
+            NUMBER,
+            description="Index of the starting epoch (include) for warmup stage.",
         ),
         "warmup_end_epoch": with_attributes(NUMBER, description="Index of the end epoch (exclude) for warmup stage."),
         "importance_regularization_factor": with_attributes(
@@ -413,7 +434,11 @@ MOVEMENT_SCHEDULER_PARAMS_SCHEMA = {
         ),
     },
     "additionalProperties": False,
-    "required": ["warmup_start_epoch", "warmup_end_epoch", "importance_regularization_factor"],
+    "required": [
+        "warmup_start_epoch",
+        "warmup_end_epoch",
+        "importance_regularization_factor",
+    ],
 }
 
 
