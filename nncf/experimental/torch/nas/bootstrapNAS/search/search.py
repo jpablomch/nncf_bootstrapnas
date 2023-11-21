@@ -469,11 +469,11 @@ class SearchAlgorithm(BaseSearchAlgorithm):
             col = range(int(self.search_params.num_evals / self.search_params.population))
             for i in range(0, len(self.search_records), self.search_params.population):
                 c = [col[int(i / self.search_params.population)]] * len(
-                    self.search_records[i: i + self.search_params.population]
+                    self.search_records[i : i + self.search_params.population]
                 )
                 plt.scatter(
-                    [abs(row[2]) for row in self.search_records][i: i + self.search_params.population],
-                    [abs(row[4]) for row in self.search_records][i: i + self.search_params.population],
+                    [abs(row[2]) for row in self.search_records][i : i + self.search_params.population],
+                    [abs(row[4]) for row in self.search_records][i : i + self.search_params.population],
                     s=9,
                     c=c,
                     alpha=0.5,
