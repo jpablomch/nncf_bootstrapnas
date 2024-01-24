@@ -54,6 +54,10 @@ class TensorReducerBase(ABC):
 
     @property
     def output_port_id(self) -> int:
+        """
+        Port id of the last node of the reducer subgraph if statistic is inplace.
+        Port id of the reducer output return node if statistic is not inplace.
+        """
         return 0
 
     @property
@@ -74,17 +78,6 @@ class TensorReducerBase(ABC):
         """
 
     @abstractmethod
-    def get_output_names(self, target_node_name: str, port_id: int) -> List[str]:
-        """
-        Returns target output names from target model that is
-            modified for statistic collection.
-
-        :param target_node_name: Target node name for reducer.
-        :param port_id: Target port id for target node name for reducer.
-        :return: Target output names for reducer.
-        """
-
-    @abstractmethod
     def get_inplace_fn(self) -> Optional[InplaceInsertionFNType]:
         """
         Returns correspondent inplace operation builder if inplace operations are available in backend.
@@ -93,6 +86,9 @@ class TensorReducerBase(ABC):
         """
 
     def __call__(self, x: List[NNCFTensor]):
+        if any(t.is_empty() for t in x):
+            return None
+
         if self.inplace:
             return x
 
@@ -299,9 +295,9 @@ class TensorCollector:
         for reducer in self._reducers:
             reducer_hash = hash(reducer)
             input_ = inputs[reducer_hash]
-            if any(tensor.is_empty() for tensor in input_):
-                continue
-            reduced_inputs[reducer_hash] = reducer(input_)
+            reduced_input = reducer(input_)
+            if reduced_input is not None:
+                reduced_inputs[reducer_hash] = reduced_input
 
         for (
             (reducer_hash, reducer_port_id, _),
@@ -480,6 +476,14 @@ class NoopReducer(TensorReducerBase):
 
     def _reduce_out_of_place(self, x: List[TensorType]) -> List[TensorType]:
         return x
+
+
+class RawReducer(NoopReducer):
+    def __init__(self):
+        super().__init__()
+
+    def __call__(self, x: List[NNCFTensor]):
+        return self._reduce_out_of_place(x)
 
 
 class MinReducer(TensorReducerBase):

@@ -26,6 +26,7 @@ from nncf.experimental.common.tensor_statistics.collectors import MinReducer
 from nncf.experimental.common.tensor_statistics.collectors import NoopAggregator
 from nncf.experimental.common.tensor_statistics.collectors import NoopReducer
 from nncf.experimental.common.tensor_statistics.collectors import QuantileReducer
+from nncf.experimental.common.tensor_statistics.collectors import RawReducer
 from nncf.experimental.common.tensor_statistics.collectors import ShapeAggregator
 from nncf.experimental.common.tensor_statistics.collectors import TensorCollector
 from nncf.experimental.common.tensor_statistics.collectors import TensorReducerBase
@@ -195,13 +196,6 @@ class ONNXBasicReducer(TensorReducerBase):
     def get_inplace_fn(self):
         raise NotImplementedError("ONNX backend has no support of inplace statistics yet.")
 
-    def get_output_names(self, target_node_name: str, port_id: int) -> List[str]:
-        raise NotImplementedError("The method is not implemented.")
-
-
-class ONNXNoopReducer(ONNXBasicReducer, NoopReducer):
-    pass
-
 
 class ONNXMinReducer(ONNXBasicReducer, MinReducer):
     pass
@@ -253,7 +247,7 @@ def get_mean_statistic_collector(
         reducer = ONNXBatchMeanReducer(inplace)
     else:
         reducer = ONNXMeanPerChanelReducer(channel_axis=channel_axis, inplace=inplace)
-    noop_reducer = ONNXNoopReducer()
+    noop_reducer = NoopReducer()
 
     kwargs = {
         "tensor_processor": ONNXNNCFCollectorTensorProcessor,
@@ -277,7 +271,7 @@ def get_raw_stat_collector(num_samples: int) -> TensorCollector:
     :param num_samples: Maximum number of samples to collect.
     :return: Raw statistic collector.
     """
-    reducer = ONNXNoopReducer()
+    reducer = RawReducer()
     aggregator = NoopAggregator(num_samples)
 
     collector = TensorCollector(ONNXRawTensorStatistic)
