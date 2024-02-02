@@ -1,4 +1,4 @@
-# Copyright (c) 2023 Intel Corporation
+# Copyright (c) 2024 Intel Corporation
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -192,6 +192,11 @@ def _(a: torch.Tensor, decimals=0) -> torch.Tensor:
     return torch.round(a, decimals=decimals)
 
 
+@numeric.power.register(torch.Tensor)
+def _(a: torch.Tensor, exponent: Union[torch.Tensor, float]) -> torch.Tensor:
+    return torch.pow(a, exponent=exponent)
+
+
 @numeric.quantile.register(torch.Tensor)
 def _(
     a: torch.Tensor,
@@ -263,3 +268,23 @@ def _(
 @numeric.size.register(torch.Tensor)
 def _(a: torch.Tensor) -> int:
     return torch.numel(a)
+
+
+@numeric.matmul.register(torch.Tensor)
+def _(x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
+    return torch.matmul(x1, x2)
+
+
+@numeric.unsqueeze.register(torch.Tensor)
+def _(a: torch.Tensor, axis: Optional[Union[int, Tuple[int, ...]]] = None) -> torch.Tensor:
+    return torch.unsqueeze(a, dim=axis)
+
+
+@numeric.transpose.register(torch.Tensor)
+def _(a: torch.Tensor, axes: Optional[Tuple[int, ...]] = None) -> torch.Tensor:
+    return a.t()
+
+
+@numeric.argsort.register(torch.Tensor)
+def _(a: torch.Tensor, axis: Optional[int] = None, descending=False, stable=False) -> torch.Tensor:
+    return torch.argsort(a, dim=axis, descending=descending, stable=stable)
