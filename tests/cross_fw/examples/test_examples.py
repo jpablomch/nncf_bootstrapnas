@@ -52,9 +52,6 @@ def test_examples(
     is_check_performance: bool,
     ov_version_override: str,
 ):
-    if example_name == "llm_tune_params":
-        pytest.xfail("ticket 133681")
-
     backend = example_params["backend"]
     skip_if_backend_not_selected(backend, backends_list)
     venv_path = create_venv_with_nncf(tmp_path, "pip_e_local", "venv", set([backend]))
@@ -82,7 +79,9 @@ def test_examples(
     measured_metrics = load_json(metrics_file_path)
 
     for name, value in example_params[ACCURACY_METRICS].items():
-        assert measured_metrics[name] == pytest.approx(value, abs=ACCURACY_TOLERANCE)
+        assert measured_metrics[name] == pytest.approx(
+            value, abs=example_params.get("accuracy_tolerance", ACCURACY_TOLERANCE)
+        )
 
     if MODEL_SIZE_METRICS in example_params:
         for name, value in example_params[MODEL_SIZE_METRICS].items():
