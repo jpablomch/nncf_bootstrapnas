@@ -22,13 +22,14 @@ from typing import Any, Dict, Optional, Union
 import nncf
 from nncf.common.quantization.structs import QuantizationScheme as QuantizationMode
 from nncf.common.utils.api_marker import api
+from nncf.parameters import StrEnum
 from nncf.quantization.range_estimator import AggregatorType
 from nncf.quantization.range_estimator import RangeEstimatorParameters
 from nncf.quantization.range_estimator import StatisticsType
 
 
-@api()
-class OverflowFix(Enum):
+@api(canonical_alias="nncf.OverflowFix")
+class OverflowFix(StrEnum):
     """
     This option controls whether to apply the overflow issue fix for the 8-bit
     quantization.
@@ -58,7 +59,7 @@ class OverflowFix(Enum):
 
 
 @api()
-class FP8Type(Enum):
+class FP8Type(StrEnum):
     """
     Defines FP8 special types (https://arxiv.org/pdf/2209.05433.pdf).
 
