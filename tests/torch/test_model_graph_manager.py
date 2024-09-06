@@ -16,7 +16,8 @@ import pytest
 import torch
 from torch import nn
 
-import tests.post_training.test_templates.helpers as helpers
+import nncf.torch.graph.operator_metatypes as om
+import tests.cross_fw.test_templates.helpers as helpers
 from nncf.common.graph.graph import NNCFGraph
 from nncf.common.graph.graph import NNCFNode
 from nncf.common.graph.transformations.commands import TargetType
@@ -27,13 +28,16 @@ from nncf.torch.model_graph_manager import get_const_data
 from nncf.torch.model_graph_manager import get_const_data_on_port
 from nncf.torch.model_graph_manager import get_const_node
 from nncf.torch.model_graph_manager import get_fake_quantizer
+from nncf.torch.model_graph_manager import get_fused_bias_value
 from nncf.torch.model_graph_manager import get_module_by_name
 from nncf.torch.model_graph_manager import get_potential_fused_node
+from nncf.torch.model_graph_manager import get_weight_channel_axes
 from nncf.torch.model_graph_manager import get_weight_tensor_port_ids
 from nncf.torch.model_graph_manager import is_node_with_fused_bias
 from nncf.torch.model_graph_manager import is_quantized_weights
 from nncf.torch.model_graph_manager import set_const_data
 from nncf.torch.model_graph_manager import split_const_name
+from nncf.torch.model_graph_manager import update_fused_bias
 from nncf.torch.model_transformer import PTModelTransformer
 from nncf.torch.model_transformer import PTTransformationLayout
 from nncf.torch.nncf_network import NNCFNetwork
@@ -313,3 +317,97 @@ def test_is_quantized_weights():
     q_graph = q_model.nncf.get_graph()
     q_node = q_graph.get_node_by_name(node_name)
     assert is_quantized_weights(q_node, q_graph)
+
+
+@pytest.mark.parametrize(
+    "model_cls, ref",
+    (
+        (helpers.ConvTestModel, [0.1000, 1.0000]),  # conv.bias
+        (helpers.ConvBNTestModel, [0.1000, 1.0000]),  # bn.bias
+        (helpers.ConvBiasBNTestModel, [0.1600, 3.6000]),  # conv.bias*bn.weight + bn.bias
+    ),
+)
+def test_get_fused_bias_value(model_cls, ref):
+    model = wrap_model(model_cls(), torch.ones(model_cls.INPUT_SIZE), trace_parameters=True)
+
+    graph = model.nncf.get_graph()
+    target_node = graph.get_nodes_by_types("conv2d")[0]
+
+    bias = get_fused_bias_value(target_node, model)
+    assert torch.all(torch.isclose(bias, torch.tensor(ref)))
+
+
+@pytest.mark.parametrize(
+    "model_cls",
+    (
+        (helpers.ConvTestModel),  # conv.bias
+        (helpers.ConvBNTestModel),  # bn.bias
+        (helpers.ConvBiasBNTestModel),  # conv.bias*bn.weight + bn.bias
+    ),
+)
+def test_update_fused_bias(model_cls):
+    model = wrap_model(model_cls(), torch.ones(model_cls.INPUT_SIZE), trace_parameters=True)
+    ref_new_bias = torch.tensor([-1.0, -1.0])
+    graph = model.nncf.get_graph()
+    target_node = graph.get_nodes_by_types("conv2d")[0]
+
+    update_fused_bias(target_node.node_name, ref_new_bias, model)
+    bias = get_fused_bias_value(target_node, model)
+    assert torch.all(torch.isclose(bias, ref_new_bias))
+
+    if model_cls == helpers.ConvTestModel:
+        assert torch.all(torch.isclose(model.conv.bias, ref_new_bias))
+    if model_cls == helpers.ConvBNTestModel:
+        assert model.conv.bias is None
+        assert torch.all(torch.isclose(model.bn.bias, ref_new_bias))
+    if model_cls == helpers.ConvBiasBNTestModel:
+        assert torch.all(torch.isclose(model.conv.bias, torch.tensor([0.3000, 1.3000])))
+        assert torch.all(torch.isclose(model.bn.bias, torch.tensor([-1.0600, -3.6000])))
+        assert torch.all(torch.isclose(model.conv.bias * model.bn.weight + model.bn.bias, ref_new_bias))
+
+
+class TestGetWeightChannelAxes:
+
+    @pytest.mark.parametrize(
+        "ndim1, ndim2, ref_dim1, ref_dim2",
+        (
+            (1, 1, (), ()),  # vector x vector
+            (1, 2, (), (1,)),  # vector x matrix
+            (1, 3, (), (2,)),  # vector x matrix
+            (2, 1, (0,), ()),  # matrix x vector
+            (3, 1, (1,), ()),  # batched matrix x vector
+            (3, 3, (1,), (2,)),  # batched matrix x batched matrix
+            (3, 2, (1,), (1,)),  # batched matrix x broadcasted matrix
+        ),
+    )
+    def test_matmul(self, ndim1, ndim2, ref_dim1, ref_dim2):
+        assert get_weight_channel_axes(om.PTMatMulMetatype, ndim1, 0) == ref_dim1
+        assert get_weight_channel_axes(om.PTMatMulMetatype, ndim2, 1) == ref_dim2
+
+    @pytest.mark.parametrize(
+        "ndim1, ndim2, ref_dim1, ref_dim2",
+        (
+            (2, 2, (0,), (1,)),  # matrix x matrix
+            (3, 3, (1,), (2,)),  # batched matrix x batched matrix
+            (3, 2, (1,), (1,)),  # batched matrix x broadcasted matrix
+        ),
+    )
+    def test_addmm(self, ndim1, ndim2, ref_dim1, ref_dim2):
+        assert get_weight_channel_axes(om.PTAddmmMetatype, ndim1, 1) == ref_dim1
+        assert get_weight_channel_axes(om.PTAddmmMetatype, ndim2, 2) == ref_dim2
+
+    @pytest.mark.parametrize("ndims", (3, 4, 5))
+    @pytest.mark.parametrize("metatype", (om.PTConv1dMetatype, om.PTConv2dMetatype, om.PTConv3dMetatype))
+    def test_conv(self, ndims, metatype):
+        assert get_weight_channel_axes(metatype, ndims, 1) == (0,)
+
+    @pytest.mark.parametrize("ndims", (3, 4, 5))
+    @pytest.mark.parametrize(
+        "metatype", (om.PTConvTranspose1dMetatype, om.PTConvTranspose2dMetatype, om.PTConvTranspose3dMetatype)
+    )
+    def test_transpose_conv(self, ndims, metatype):
+        assert get_weight_channel_axes(metatype, ndims, 1) == (1,)
+
+    def test_exception(self):
+        with pytest.raises(ValueError, match="Unexpected input_port_id=3"):
+            get_weight_channel_axes(om.PTAddmmMetatype, 1, 3)

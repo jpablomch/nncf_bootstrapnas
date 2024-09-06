@@ -21,10 +21,11 @@ from nncf.onnx.graph.nncf_graph_builder import ONNXLayerAttributes
 from nncf.onnx.graph.transformations.commands import ONNXTargetPoint
 from nncf.quantization.algorithms.min_max.backend import MinMaxAlgoBackend
 from nncf.quantization.algorithms.min_max.onnx_backend import ONNXMinMaxAlgoBackend
-from tests.post_training.test_templates.models import NNCFGraphToTest
-from tests.post_training.test_templates.test_min_max import TemplateTestGetChannelAxes
-from tests.post_training.test_templates.test_min_max import TemplateTestGetTargetPointShape
-from tests.post_training.test_templates.test_min_max import TemplateTestMinMaxAlgorithm
+from tests.cross_fw.test_templates.models import NNCFGraphToTest
+from tests.cross_fw.test_templates.test_min_max import MATMUL_WEIGHT_SHAPE
+from tests.cross_fw.test_templates.test_min_max import TemplateTestGetChannelAxes
+from tests.cross_fw.test_templates.test_min_max import TemplateTestGetTargetPointShape
+from tests.cross_fw.test_templates.test_min_max import TemplateTestMinMaxAlgorithm
 
 
 class TestONNXMinMaxAlgorithm(TemplateTestMinMaxAlgorithm):
@@ -79,3 +80,15 @@ class TestONNXGetChannelAxesMinMaxAlgorithm(TemplateTestGetChannelAxes, TestONNX
 
     def test_get_channel_axes_matmul_torch(self):
         pytest.skip("Test is not applied for ONNX backend.")
+
+    @pytest.mark.parametrize(
+        "weight_shape, weight_port_id, transpose_weight, ref_axes",
+        (
+            (MATMUL_WEIGHT_SHAPE, 1, False, (-1,)),
+            (MATMUL_WEIGHT_SHAPE, 1, True, (-2,)),
+            (MATMUL_WEIGHT_SHAPE, 0, True, (-1,)),
+            (MATMUL_WEIGHT_SHAPE, 0, False, (-2,)),
+        ),
+    )
+    def test_get_channel_axes_matmul_node_ov_onnx(self, weight_shape, weight_port_id, transpose_weight, ref_axes):
+        super().test_get_channel_axes_matmul_node_ov_onnx(weight_shape, weight_port_id, transpose_weight, ref_axes)

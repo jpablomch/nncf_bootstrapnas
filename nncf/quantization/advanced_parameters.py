@@ -211,7 +211,7 @@ class AdvancedQuantizationParameters:
         It regulates the calculation of the smooth scale. The default value stored in AdvancedSmoothQuantParameters.
         A negative value for each field switches off type smoothing. In case of inaccurate results,
         fields may be adjusted in the range from 0 to 1 or set -1 to disable smoothing for type.
-    :type smooth_quant_alpha: AdvancedSmoothQuantParameters
+    :type smooth_quant_alpha: nncf.quantization.advanced_parameters.AdvancedSmoothQuantParameters
     :param smooth_quant_alpha: Deprecated SmoothQuant-related parameter.
     :type smooth_quant_alpha: float
     :param backend_params: Backend-specific parameters.
@@ -244,6 +244,128 @@ class AdvancedQuantizationParameters:
 
     # Backend specific parameters
     backend_params: Dict[str, Any] = field(default_factory=dict)
+
+
+@api()
+@dataclass
+class AdvancedAWQParameters:
+    """
+    Contains advanced parameters for AWQ algorithm.
+
+    :param subset_size: The number of samples for AWQ.
+    :type subset_size: int
+    :param percent_to_apply: The percent of outliers for correction.
+    :type percent_to_apply: float
+    :param alpha_min: Minimum value of smoothness parameter for grid search.
+    :type alpha_min: float
+    :param alpha_max: Maximal value of smoothness parameter for grid search.
+    :type alpha_max: float
+    :param steps: The number of the steps in grid search.
+    :type steps: int
+    """
+
+    subset_size: int = 32
+    percent_to_apply: float = 0.002
+    alpha_min: float = 0.0
+    alpha_max: float = 1.0
+    steps: int = 100
+
+
+@api()
+@dataclass
+class AdvancedScaleEstimationParameters:
+    """
+    Contains advanced parameters for scale estimation algorithm.
+
+    :param subset_size: The number of samples for scale estimation.
+    :type subset_size: int
+    :param initial_steps: The number of the steps for absmax scale rectification.
+    :type initial_steps: int
+    :param scale_steps: The number of the steps for grid search scale rectification
+        from 1.0 to 1.0 - 0.05 * scale_step.
+    :type scale_steps: int
+    :param weight_penalty: coefficient for penalty between fp and compressed weights. If -1 then doesn't apply.
+    :type weight_penalty: float
+    """
+
+    subset_size: int = 64
+    initial_steps: int = 5
+    scale_steps: int = 5
+    weight_penalty: float = -1.0
+
+
+@api()
+@dataclass
+class AdvancedGPTQParameters:
+    """
+    Contains advanced parameters for GPTQ algorithm.
+
+    :param damp_percent: The percent of the average Hessian diagonal to use for dampening,
+        recommended value is 0.1.
+    :type damp_percent: float
+    :param block_size: The size of the blocks used during quantization. Defaults to 128.
+    :type block_size: int
+    :param subset_size: Number of data samples to calculate Hessian. Defaults to 128.
+    :type subset_size: int
+    """
+
+    damp_percent: float = 0.1
+    block_size: int = 128
+    subset_size: int = 128
+
+
+@api()
+@dataclass
+class AdvancedLoraCorrectionParameters:
+    """
+    Contains advanced parameters for lora correction algorithm.
+
+    :param adapter_rank: rank of lora adapters. Defaults to 16.
+    :type adapter_rank: int
+    :param num_iterations: number of correction iterations. Defaults to 3.
+    :type num_iterations: int
+    :param apply_regularization: Whether to add a regularization during the correction process. Defaults to True.
+        Helpful for big rank values to avoid overfitting.
+    :type apply_regularization: bool
+    :param subset_size: Number of data samples for lora correction algorithm. Defaults to 128.
+    :type subset_size: int
+    :param use_int8_adapters: Whether to 8-bit quantize lora adapters, otherwise they kept in the original weights
+        precision. Defaults to True.
+    :type use_int8_adapters: bool
+    """
+
+    adapter_rank: int = 8
+    num_iterations: int = 3
+    apply_regularization: bool = True
+    subset_size: int = 128
+    use_int8_adapters: bool = True
+
+
+@api()
+@dataclass
+class AdvancedCompressionParameters:
+    """
+    Contains advanced parameters for compression algorithms.
+
+    :param awq_params: Advanced parameters for AWQ algorithm.
+    :type awq_params: AdvancedAWQParameters
+    :param scale_estimation_params: Advanced parameters for scale estimation algorithm.
+    :type scale_estimation_params: AdvancedScaleEstimationParameters
+    """
+
+    # Advanced AWQ algorithm parameters
+    awq_params: AdvancedAWQParameters = field(default_factory=AdvancedAWQParameters)
+
+    # Advanced scale estimation algorithm parameters
+    scale_estimation_params: AdvancedScaleEstimationParameters = field(
+        default_factory=AdvancedScaleEstimationParameters
+    )
+
+    # Advanced GPTQ algorithm parameters
+    gptq_params: AdvancedGPTQParameters = field(default_factory=AdvancedGPTQParameters)
+
+    # Advanced Lora Correction algorithm parameters
+    lora_correction_params: AdvancedLoraCorrectionParameters = field(default_factory=AdvancedLoraCorrectionParameters)
 
 
 @api()

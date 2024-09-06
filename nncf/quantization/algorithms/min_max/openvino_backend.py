@@ -11,8 +11,6 @@
 
 from typing import Dict, List, Optional, Set, Tuple
 
-import numpy as np
-
 import nncf
 from nncf.common.graph.graph import NNCFGraph
 from nncf.common.graph.graph import NNCFNode
@@ -22,8 +20,10 @@ from nncf.common.hardware.config import HWConfig
 from nncf.common.quantization.structs import QuantizerConfig
 from nncf.experimental.common.tensor_statistics.collectors import AGGREGATORS_MAP
 from nncf.experimental.common.tensor_statistics.collectors import TensorCollector
+from nncf.experimental.common.tensor_statistics.statistics import MinMaxTensorStatistic
 from nncf.openvino.graph.layer_attributes import OVLayerAttributes
 from nncf.openvino.graph.metatypes import openvino_metatypes as om
+from nncf.openvino.graph.metatypes.groups import ELEMENTWISE_OPERATIONS
 from nncf.openvino.graph.metatypes.groups import OPERATIONS_WITH_WEIGHTS
 from nncf.openvino.graph.model_utils import get_start_nodes_for_activation_path_tracing
 from nncf.openvino.graph.node_utils import get_weight_channel_axes
@@ -33,8 +33,6 @@ from nncf.openvino.graph.transformations.commands import OVTargetPoint
 from nncf.openvino.hardware.config import OVHWConfig
 from nncf.openvino.quantization.default_quantization import DEFAULT_OV_QUANT_TRAIT_TO_OP_DICT
 from nncf.openvino.statistics.collectors import OV_REDUCERS_MAP
-from nncf.openvino.statistics.collectors import OVNNCFCollectorTensorProcessor
-from nncf.openvino.statistics.statistics import OVMinMaxTensorStatistic
 from nncf.parameters import ModelType
 from nncf.parameters import TargetDevice
 from nncf.quantization.advanced_parameters import RangeEstimatorParameters
@@ -42,9 +40,14 @@ from nncf.quantization.advanced_parameters import StatisticsType
 from nncf.quantization.algorithms.min_max.backend import MinMaxAlgoBackend
 from nncf.quantization.fake_quantize import FakeConvertParameters
 from nncf.quantization.fake_quantize import FakeQuantizeParameters
+from nncf.quantization.range_estimator import AggregatorType
 
 
 class OVMinMaxAlgoBackend(MinMaxAlgoBackend):
+    @property
+    def preserved_metatypes(self) -> List[OperatorMetatype]:
+        return [om.OVConvolutionMetatype, om.OVLSTMSequenceMetatype]
+
     @property
     def mat_mul_metatypes(self) -> List[OperatorMetatype]:
         return [om.OVMatMulMetatype]
@@ -56,6 +59,10 @@ class OVMinMaxAlgoBackend(MinMaxAlgoBackend):
     @property
     def conv_metatypes(self) -> List[OperatorMetatype]:
         return [om.OVConvolutionMetatype]
+
+    @property
+    def elementwise_metatypes(self) -> List[OperatorMetatype]:
+        return ELEMENTWISE_OPERATIONS
 
     @property
     def overflow_fix_metatypes(self) -> List[OperatorMetatype]:
@@ -137,27 +144,23 @@ class OVMinMaxAlgoBackend(MinMaxAlgoBackend):
         return OVConvertInsertionCommand(target_point, parameters)
 
     @staticmethod
-    def unify_statistics(statistics: List[OVMinMaxTensorStatistic]) -> OVMinMaxTensorStatistic:
-        max_values, min_values = [], []
-        for statistic in statistics:
-            max_values.append(np.array(statistic.max_values).flatten())
-            min_values.append(np.array(statistic.min_values).flatten())
-        max_values = np.max(max_values, axis=0)
-        min_values = np.min(min_values, axis=0)
-        return OVMinMaxTensorStatistic(min_values=min_values, max_values=max_values)
-
-    @staticmethod
     def get_target_point_shape(nncf_graph: NNCFGraph, node: NNCFNode, target_point: OVTargetPoint) -> Tuple[int, ...]:
         if target_point.is_weight_target_point():
             return node.layer_attributes.constant_attributes[target_point.port_id]["shape"]
+
         if target_point.type == TargetType.PRE_LAYER_OPERATION:
-            return nncf_graph.get_input_edges(node)[target_point.port_id].tensor_shape
+            edge = nncf_graph.get_input_edge_by_port_id(node, target_point.port_id)
+            return edge.tensor_shape
         elif target_point.type == TargetType.POST_LAYER_OPERATION:
-            return nncf_graph.get_output_edges(node)[target_point.port_id].tensor_shape
+            # NOTE: Assumes that all output edges for the `node` with `output_port_id`
+            # equal to `target_point.port_id` should have the same `tensor_shape` value.
+            edges = nncf_graph.get_output_edges_by_port_id(node, target_point.port_id)
+            return edges[0].tensor_shape
+
         raise NotImplementedError(f"Unsupported target point type {target_point.type}.")
 
     @staticmethod
-    def get_weight_quantization_axes(node: NNCFNode, target_point: OVTargetPoint) -> Tuple[int]:
+    def get_weight_quantization_axes(node: NNCFNode, target_point: OVTargetPoint, ndims: int) -> Tuple[int]:
         return tuple(get_weight_channel_axes(node))
 
     @staticmethod
@@ -169,10 +172,10 @@ class OVMinMaxAlgoBackend(MinMaxAlgoBackend):
         inplace: bool,
         num_samples: Optional[int] = None,
     ) -> TensorCollector:
-        collector = TensorCollector(OVMinMaxTensorStatistic)
+        collector = TensorCollector(MinMaxTensorStatistic)
         for params, container_key in zip(
             [range_estimator_params.min, range_estimator_params.max],
-            [OVMinMaxTensorStatistic.MIN_STAT, OVMinMaxTensorStatistic.MAX_STAT],
+            [MinMaxTensorStatistic.MIN_STAT, MinMaxTensorStatistic.MAX_STAT],
         ):
             if params.statistics_type not in OV_REDUCERS_MAP:
                 raise nncf.InternalError(
@@ -184,7 +187,7 @@ class OVMinMaxAlgoBackend(MinMaxAlgoBackend):
                 )
             kwargs = {"reduction_axes": reduction_axes, "inplace": inplace}
             if params.statistics_type in [StatisticsType.QUANTILE, StatisticsType.ABS_QUANTILE]:
-                if container_key == OVMinMaxTensorStatistic.MIN_STAT:
+                if container_key == MinMaxTensorStatistic.MIN_STAT:
                     quantile = params.quantile_outlier_prob
                 else:
                     quantile = 1 - params.quantile_outlier_prob
@@ -195,17 +198,19 @@ class OVMinMaxAlgoBackend(MinMaxAlgoBackend):
                 statistic_type = StatisticsType.ABS_MAX
             reducer = OV_REDUCERS_MAP[statistic_type](**kwargs)
 
-            aggregator = AGGREGATORS_MAP[params.aggregator_type](
-                num_samples=num_samples,
-                aggregation_axes=aggregation_axes,
-                tensor_processor=OVNNCFCollectorTensorProcessor,
-            )
+            kwargs = {
+                "num_samples": num_samples,
+                "aggregation_axes": aggregation_axes,
+            }
+            if params.aggregator_type in [AggregatorType.MEAN_NO_OUTLIERS, AggregatorType.MEDIAN_NO_OUTLIERS]:
+                kwargs.update({"quantile": params.quantile_outlier_prob})
+            aggregator = AGGREGATORS_MAP[params.aggregator_type](**kwargs)
 
             collector.register_statistic_branch(container_key, reducer, aggregator)
         return collector
 
     @staticmethod
-    def get_weight_tensor_port_ids(node: NNCFNode) -> List[Optional[int]]:
+    def get_weight_tensor_port_ids(node: NNCFNode, graph: NNCFGraph) -> List[Optional[int]]:
         return node.layer_attributes.get_const_port_ids()
 
     @staticmethod
@@ -227,21 +232,28 @@ class OVMinMaxAlgoBackend(MinMaxAlgoBackend):
                 om.OVDivideMetatype,
                 om.OVSqrtMetatype,
                 om.OVMaximumMetatype,
+                # Сomparison operations
+                om.OVGreaterEqualMetatype,
+                om.OVGreaterMetatype,
+                om.OVLessEqualMetatype,
+                om.OVLessMetatype,
+                om.OVNotEqualMetatype,
+                om.OVEqualMetatype,
             ]
             if device != TargetDevice.CPU_SPR:
                 types.append(om.OVMultiplyMetatype)
         return types
 
     @staticmethod
-    def get_ignored_names_by_layer_attributes(nncf_graph: NNCFGraph) -> List[str]:
-        ignored_names = []
+    def get_ignored_names_by_layer_attributes(nncf_graph: NNCFGraph) -> Set[str]:
+        ignored_names = set()
         target_nodes = nncf_graph.get_nodes_by_metatypes([om.OVGRUSequenceMetatype])
         for node in target_nodes:
             if (
                 isinstance(node.layer_attributes, OVLayerAttributes)
                 and node.layer_attributes.input_attributes["linear_before_reset"]
             ):
-                ignored_names.append(node.node_name)
+                ignored_names.add(node.node_name)
         return ignored_names
 
     @staticmethod

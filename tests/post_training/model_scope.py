@@ -17,13 +17,18 @@ from nncf import ModelType
 from nncf import QuantizationPreset
 from nncf.parameters import CompressWeightsMode
 from nncf.parameters import SensitivityMetric
+from nncf.quantization.advanced_parameters import AdvancedCompressionParameters
+from nncf.quantization.advanced_parameters import AdvancedLoraCorrectionParameters
 from nncf.quantization.advanced_parameters import AdvancedQuantizationParameters
+from nncf.quantization.advanced_parameters import AdvancedScaleEstimationParameters
 from nncf.quantization.advanced_parameters import AdvancedSmoothQuantParameters
 from tests.post_training.pipelines.base import ALL_PTQ_BACKENDS
 from tests.post_training.pipelines.base import NNCF_PTQ_BACKENDS
 from tests.post_training.pipelines.base import BackendType
 from tests.post_training.pipelines.causal_language_model import CausalLMHF
+from tests.post_training.pipelines.gpt import GPT
 from tests.post_training.pipelines.image_classification_timm import ImageClassificationTimm
+from tests.post_training.pipelines.image_classification_torchvision import ImageClassificationTorchvision
 from tests.post_training.pipelines.lm_weight_compression import LMWeightCompression
 from tests.post_training.pipelines.masked_language_modeling import MaskedLanguageModelingHF
 
@@ -39,10 +44,9 @@ QUANTIZATION_MODELS = [
             "subset_size": 2,
         },
         "backends": ALL_PTQ_BACKENDS + [BackendType.OPTIMUM],
-        "is_batch_size_supported": False,
     },
     {
-        "reported_name": "hf/hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
+        "reported_name": "hf/hf-internal-testing/tiny-random-GPTNeoXForCausalLM_statefull",
         "model_id": "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
         "pipeline_cls": CausalLMHF,
         "compression_params": {
@@ -50,8 +54,73 @@ QUANTIZATION_MODELS = [
             "model_type": ModelType.TRANSFORMER,
             "subset_size": 2,
         },
+        "params": {"is_stateful": True},
         "backends": [BackendType.OPTIMUM],
-        "is_batch_size_supported": False,
+    },
+    {
+        "reported_name": "hf/hf-internal-testing/tiny-random-GPTNeoXForCausalLM_stateless",
+        "model_id": "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
+        "pipeline_cls": CausalLMHF,
+        "compression_params": {
+            "preset": QuantizationPreset.MIXED,
+            "model_type": ModelType.TRANSFORMER,
+            "subset_size": 2,
+        },
+        "params": {"is_stateful": False},
+        "backends": [BackendType.OPTIMUM],
+    },
+    {
+        "reported_name": "hf/hf-internal-testing/tiny-random-gpt2",
+        "model_id": "hf-internal-testing/tiny-random-gpt2",
+        "pipeline_cls": GPT,
+        "compression_params": {
+            "preset": QuantizationPreset.MIXED,
+            "model_type": ModelType.TRANSFORMER,
+            "subset_size": 2,
+        },
+        "backends": [BackendType.TORCH, BackendType.OV, BackendType.OPTIMUM],
+    },
+    # Torchvision models
+    {
+        "reported_name": "torchvision/resnet18",
+        "model_id": "resnet18",
+        "pipeline_cls": ImageClassificationTorchvision,
+        "compression_params": {},
+        "backends": [BackendType.FX_TORCH, BackendType.TORCH, BackendType.CUDA_TORCH, BackendType.OV, BackendType.ONNX],
+        "batch_size": 128,
+    },
+    {
+        "reported_name": "torchvision/mobilenet_v3_small_BC",
+        "model_id": "mobilenet_v3_small",
+        "pipeline_cls": ImageClassificationTorchvision,
+        "compression_params": {
+            "fast_bias_correction": False,
+            "preset": QuantizationPreset.MIXED,
+        },
+        "backends": [BackendType.FX_TORCH, BackendType.OV, BackendType.ONNX],
+        "batch_size": 128,
+    },
+    {
+        "reported_name": "torchvision/vit_b_16",
+        "model_id": "vit_b_16",
+        "pipeline_cls": ImageClassificationTorchvision,
+        "compression_params": {
+            "model_type": ModelType.TRANSFORMER,
+            "advanced_parameters": AdvancedQuantizationParameters(smooth_quant_alpha=0.15),
+        },
+        "backends": [BackendType.FX_TORCH, BackendType.OV],
+        "batch_size": 1,
+    },
+    {
+        "reported_name": "torchvision/swin_v2_s",
+        "model_id": "swin_v2_s",
+        "pipeline_cls": ImageClassificationTorchvision,
+        "compression_params": {
+            "model_type": ModelType.TRANSFORMER,
+            "advanced_parameters": AdvancedQuantizationParameters(smooth_quant_alpha=0.5),
+        },
+        "backends": [BackendType.FX_TORCH, BackendType.OV],
+        "batch_size": 1,
     },
     # Timm models
     {
@@ -64,6 +133,7 @@ QUANTIZATION_MODELS = [
             "advanced_parameters": AdvancedQuantizationParameters(smooth_quant_alpha=-1.0),
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/darknet53",
@@ -73,6 +143,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/deit3_small_patch16_224",
@@ -86,6 +157,7 @@ QUANTIZATION_MODELS = [
             ),
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/dla34",
@@ -95,6 +167,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/dpn68",
@@ -104,6 +177,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/efficientnet_b0",
@@ -113,6 +187,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/efficientnet_b0_BC",
@@ -123,6 +198,7 @@ QUANTIZATION_MODELS = [
             "fast_bias_correction": False,
         },
         "backends": [BackendType.ONNX, BackendType.OV],
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/efficientnet_lite0",
@@ -132,6 +208,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/hrnet_w18",
@@ -141,6 +218,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/inception_resnet_v2",
@@ -148,6 +226,7 @@ QUANTIZATION_MODELS = [
         "pipeline_cls": ImageClassificationTimm,
         "compression_params": {},
         "backends": NNCF_PTQ_BACKENDS,
+        "batch_size": 64,
     },
     {
         "reported_name": "timm/levit_128",
@@ -161,7 +240,6 @@ QUANTIZATION_MODELS = [
             ),
         },
         "backends": NNCF_PTQ_BACKENDS,
-        "is_batch_size_supported": False,  # Issue is raised during export with dynamich shape.
     },
     {
         "reported_name": "timm/mobilenetv2_050",
@@ -171,6 +249,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/mobilenetv2_050_BC",
@@ -181,6 +260,7 @@ QUANTIZATION_MODELS = [
             "fast_bias_correction": False,
         },
         "backends": [BackendType.ONNX, BackendType.OV],
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/mobilenetv3_small_050",
@@ -190,6 +270,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/mobilenetv3_small_050_BC",
@@ -200,6 +281,7 @@ QUANTIZATION_MODELS = [
             "fast_bias_correction": False,
         },
         "backends": [BackendType.ONNX, BackendType.OV],
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/regnetx_002",
@@ -209,6 +291,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/resnest14d",
@@ -218,13 +301,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
-    },
-    {
-        "reported_name": "timm/resnet18",
-        "model_id": "resnet18",
-        "pipeline_cls": ImageClassificationTimm,
-        "compression_params": {},
-        "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/swin_base_patch4_window7_224",
@@ -235,6 +312,7 @@ QUANTIZATION_MODELS = [
             "model_type": ModelType.TRANSFORMER,
         },
         "backends": [BackendType.OV],
+        "batch_size": 32,
     },
     {
         "reported_name": "timm/swin_base_patch4_window7_224_no_sq",
@@ -248,6 +326,7 @@ QUANTIZATION_MODELS = [
             ),
         },
         "backends": [BackendType.TORCH, BackendType.CUDA_TORCH, BackendType.ONNX],
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/tf_inception_v3",
@@ -257,6 +336,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/vgg11",
@@ -264,6 +344,7 @@ QUANTIZATION_MODELS = [
         "pipeline_cls": ImageClassificationTimm,
         "compression_params": {},
         "backends": NNCF_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/visformer_small",
@@ -274,6 +355,7 @@ QUANTIZATION_MODELS = [
             "model_type": ModelType.TRANSFORMER,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
     {
         "reported_name": "timm/wide_resnet50_2",
@@ -283,6 +365,7 @@ QUANTIZATION_MODELS = [
             "preset": QuantizationPreset.MIXED,
         },
         "backends": ALL_PTQ_BACKENDS,
+        "batch_size": 128,
     },
 ]
 
@@ -299,7 +382,6 @@ WEIGHT_COMPRESSION_MODELS = [
             "sensitivity_metric": SensitivityMetric.WEIGHT_QUANTIZATION_ERROR,
         },
         "backends": [BackendType.OV],
-        "is_batch_size_supported": False,
     },
     {
         "reported_name": "tinyllama_data_aware",
@@ -307,15 +389,6 @@ WEIGHT_COMPRESSION_MODELS = [
         "pipeline_cls": LMWeightCompression,
         "compression_params": {"group_size": 64, "ratio": 0.8, "mode": CompressWeightsMode.INT4_SYM},
         "backends": [BackendType.OV],
-        "is_batch_size_supported": False,
-    },
-    {
-        "reported_name": "tinyllama_data_aware_awq",
-        "model_id": "tinyllama/tinyllama-1.1b-step-50k-105b",
-        "pipeline_cls": LMWeightCompression,
-        "compression_params": {"group_size": 64, "ratio": 0.8, "mode": CompressWeightsMode.INT4_SYM, "awq": True},
-        "backends": [BackendType.OV],
-        "is_batch_size_supported": False,
     },
     {
         "reported_name": "tinyllama_data_aware_awq_stateful",
@@ -324,7 +397,90 @@ WEIGHT_COMPRESSION_MODELS = [
         "compression_params": {"group_size": 64, "ratio": 0.8, "mode": CompressWeightsMode.INT4_SYM, "awq": True},
         "params": {"is_stateful": True},
         "backends": [BackendType.OV],
-        "is_batch_size_supported": False,
+    },
+    {
+        "reported_name": "tinyllama_data_aware_awq_scale_estimation",
+        "model_id": "tinyllama/tinyllama-1.1b-step-50k-105b",
+        "pipeline_cls": LMWeightCompression,
+        "compression_params": {
+            "group_size": 64,
+            "ratio": 0.8,
+            "mode": CompressWeightsMode.INT4_SYM,
+            "awq": True,
+            "scale_estimation": True,
+            "advanced_parameters": AdvancedCompressionParameters(
+                scale_estimation_params=AdvancedScaleEstimationParameters(32, 5, 10, 1.0)
+            ),
+        },
+        "backends": [BackendType.OV],
+    },
+    {
+        "reported_name": "tinyllama_data_aware_awq_scale_estimation_stateful",
+        "model_id": "tinyllama/tinyllama-1.1b-step-50k-105b",
+        "pipeline_cls": LMWeightCompression,
+        "compression_params": {
+            "group_size": 64,
+            "ratio": 0.8,
+            "mode": CompressWeightsMode.INT4_SYM,
+            "awq": True,
+            "scale_estimation": True,
+            "advanced_parameters": AdvancedCompressionParameters(
+                scale_estimation_params=AdvancedScaleEstimationParameters(32, 5, 10, 1.0)
+            ),
+        },
+        "params": {"is_stateful": True},
+        "backends": [BackendType.OV],
+    },
+    {
+        "reported_name": "tinyllama_int8_data_free",
+        "model_id": "tinyllama/tinyllama-1.1b-step-50k-105b",
+        "pipeline_cls": LMWeightCompression,
+        "compression_params": {
+            "mode": CompressWeightsMode.INT8_ASYM,
+        },
+        "backends": [BackendType.TORCH],
+    },
+    {
+        "reported_name": "tinyllama_data_aware_gptq",
+        "model_id": "tinyllama/tinyllama-1.1b-step-50k-105b",
+        "pipeline_cls": LMWeightCompression,
+        "compression_params": {
+            "group_size": 64,
+            "ratio": 0.8,
+            "mode": CompressWeightsMode.INT4_SYM,
+            "gptq": True,
+        },
+        "backends": [BackendType.OV],
+    },
+    {
+        "reported_name": "tinyllama_scale_estimation_per_channel",
+        "model_id": "tinyllama/tinyllama-1.1b-step-50k-105b",
+        "pipeline_cls": LMWeightCompression,
+        "compression_params": {
+            "group_size": -1,
+            "ratio": 0.8,
+            "mode": CompressWeightsMode.INT4_ASYM,
+            "scale_estimation": True,
+        },
+        "backends": [BackendType.OV],
+    },
+    {
+        "reported_name": "tinyllama_data_aware_lora_stateful",
+        "model_id": "tinyllama/tinyllama-1.1b-step-50k-105b",
+        "pipeline_cls": LMWeightCompression,
+        "compression_params": {
+            "group_size": 64,
+            "ratio": 0.8,
+            "mode": CompressWeightsMode.INT4_SYM,
+            "lora_correction": True,
+            "advanced_parameters": AdvancedCompressionParameters(
+                lora_correction_params=AdvancedLoraCorrectionParameters(
+                    adapter_rank=8, num_iterations=3, apply_regularization=False, subset_size=32, use_int8_adapters=True
+                )
+            ),
+        },
+        "params": {"is_stateful": True},
+        "backends": [BackendType.OV],
     },
 ]
 

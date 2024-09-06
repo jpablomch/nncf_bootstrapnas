@@ -25,15 +25,15 @@ from nncf.scopes import IgnoredScope
 from nncf.torch.graph.graph import PTNNCFGraph
 from nncf.torch.graph.graph import PTTargetPoint
 from nncf.torch.graph.operator_metatypes import PTCatMetatype
-from nncf.torch.graph.operator_metatypes import PTModuleConv2dMetatype
-from nncf.torch.graph.operator_metatypes import PTModuleLinearMetatype
+from nncf.torch.graph.operator_metatypes import PTConv2dMetatype
+from nncf.torch.graph.operator_metatypes import PTLinearMetatype
 from nncf.torch.graph.operator_metatypes import PTSoftmaxMetatype
 from nncf.torch.graph.transformations.commands import PTSharedFnInsertionCommand
 from tests.common.quantization.metatypes import CatTestMetatype
 from tests.common.quantization.metatypes import Conv2dTestMetatype
 from tests.common.quantization.metatypes import LinearTestMetatype
 from tests.common.quantization.metatypes import SoftmaxTestMetatype
-from tests.post_training.test_templates.test_ptq_params import TemplateTestPTQParams
+from tests.cross_fw.test_templates.test_ptq_params import TemplateTestPTQParams
 from tests.torch.helpers import create_bn
 from tests.torch.helpers import create_conv
 from tests.torch.helpers import create_depthwise_conv
@@ -121,8 +121,8 @@ class TestPTQParams(TemplateTestPTQParams):
     @property
     def metatypes_mapping(self):
         return {
-            Conv2dTestMetatype: PTModuleConv2dMetatype,
-            LinearTestMetatype: PTModuleLinearMetatype,
+            Conv2dTestMetatype: PTConv2dMetatype,
+            LinearTestMetatype: PTLinearMetatype,
             SoftmaxTestMetatype: PTSoftmaxMetatype,
             CatTestMetatype: PTCatMetatype,
         }

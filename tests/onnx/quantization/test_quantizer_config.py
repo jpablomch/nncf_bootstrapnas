@@ -16,10 +16,10 @@ from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXConvolutionMetatype
 from nncf.onnx.graph.metatypes.onnx_metatypes import ONNXDepthwiseConvolutionMetatype
 from nncf.onnx.graph.nncf_graph_builder import ONNXLayerAttributes
 from nncf.quantization.algorithms.min_max.onnx_backend import ONNXMinMaxAlgoBackend
-from tests.post_training.test_templates.models import NNCFGraphToTest
-from tests.post_training.test_templates.models import NNCFGraphToTestDepthwiseConv
-from tests.post_training.test_templates.models import NNCFGraphToTestSumAggregation
-from tests.post_training.test_templates.test_quantizer_config import TemplateTestQuantizerConfig
+from tests.cross_fw.test_templates.models import NNCFGraphToTest
+from tests.cross_fw.test_templates.models import NNCFGraphToTestDepthwiseConv
+from tests.cross_fw.test_templates.models import NNCFGraphToTestSumAggregation
+from tests.cross_fw.test_templates.test_quantizer_config import TemplateTestQuantizerConfig
 
 
 class TestQuantizerConfig(TemplateTestQuantizerConfig):
@@ -34,6 +34,7 @@ class TestQuantizerConfig(TemplateTestQuantizerConfig):
             conv_layer_attrs,
             input_layer_attrs=ONNXLayerAttributes(),
             output_layer_attrs=ONNXLayerAttributes(),
+            const_layer_attrs=ONNXLayerAttributes(),
         )
 
     @pytest.fixture
@@ -43,6 +44,7 @@ class TestQuantizerConfig(TemplateTestQuantizerConfig):
             ONNXLayerAttributes(weight_attrs={1: {"shape": [4, 4, 4, 4]}}, bias_attrs={}),
             input_layer_attrs=ONNXLayerAttributes(),
             output_layer_attrs=ONNXLayerAttributes(),
+            const_layer_attrs=ONNXLayerAttributes(),
         )
 
     @pytest.fixture
@@ -55,4 +57,5 @@ class TestQuantizerConfig(TemplateTestQuantizerConfig):
             sum_layer_attrs=ONNXLayerAttributes(),
             input_layer_attrs=ONNXLayerAttributes(),
             output_layer_attrs=ONNXLayerAttributes(),
+            const_layer_attrs=ONNXLayerAttributes(),
         )

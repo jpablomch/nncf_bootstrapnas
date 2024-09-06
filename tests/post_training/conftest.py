@@ -9,17 +9,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tests.shared.paths import TEST_ROOT
-
-PTQ_TEST_ROOT = TEST_ROOT / "post_training"
-FQ_CALCULATED_PARAMETERS_PATH = PTQ_TEST_ROOT / "data" / "fq_params" / "fq_params.json"
-
 
 def pytest_addoption(parser):
     parser.addoption("--data", action="store", help="Data directory")
     parser.addoption("--output", action="store", default="./tmp/", help="Directory to store artifacts")
     parser.addoption("--no-eval", action="store_true", help="Skip validation step")
-    parser.addoption("--batch-size", action="store", default=1, type=int, help="Batch size of calibration dataset")
+    parser.addoption("--batch-size", action="store", default=None, type=int, help="Batch size of calibration dataset")
     parser.addoption("--subset-size", type=int, default=None, help="Set subset size")
     parser.addoption("--fp32", action="store_true", help="Test original model")
     parser.addoption("--cuda", action="store_true", help="Enable CUDA_TORCH backend")
@@ -28,4 +23,10 @@ def pytest_addoption(parser):
         "--extra-columns",
         action="store_true",
         help="Add additional columns to reports.csv",
+    )
+    parser.addoption(
+        "--memory-monitor",
+        action="store_true",
+        help="Report memory using MemoryMonitor from tools/memory_monitor.py. "
+        "Warning: currently, reported memory values are not always reproducible.",
     )

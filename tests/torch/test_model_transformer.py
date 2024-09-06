@@ -12,6 +12,7 @@ import os
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import List
 
@@ -21,6 +22,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+import nncf.torch.graph.operator_metatypes as om
 from nncf.common.graph.definitions import MODEL_INPUT_OP_NAME
 from nncf.common.graph.definitions import MODEL_OUTPUT_OP_NAME
 from nncf.common.graph.patterns.manager import PatternsManager
@@ -44,7 +46,6 @@ from nncf.torch.dynamic_graph.io_handling import FillerInputInfo
 from nncf.torch.dynamic_graph.operation_address import OperationAddress
 from nncf.torch.dynamic_graph.patch_pytorch import register_operator
 from nncf.torch.external_hook import ExternalOpCallHook
-from nncf.torch.graph.operator_metatypes import PTConv2dMetatype
 from nncf.torch.graph.operator_metatypes import PTInputNoopMetatype
 from nncf.torch.graph.operator_metatypes import PTModuleConv2dMetatype
 from nncf.torch.graph.operator_metatypes import PTOutputNoopMetatype
@@ -54,12 +55,11 @@ from nncf.torch.graph.transformations.command_creation import create_shared_quan
 from nncf.torch.graph.transformations.commands import ExtraCompressionModuleType
 from nncf.torch.graph.transformations.commands import PTBiasCorrectionCommand
 from nncf.torch.graph.transformations.commands import PTInsertionCommand
-from nncf.torch.graph.transformations.commands import PTModelExtractionWithFusedBiasCommand
+from nncf.torch.graph.transformations.commands import PTModelExtractionCommand
 from nncf.torch.graph.transformations.commands import PTSharedFnInsertionCommand
 from nncf.torch.graph.transformations.commands import PTTargetPoint
 from nncf.torch.graph.transformations.commands import PTWeightUpdateCommand
 from nncf.torch.graph.transformations.layout import PTTransformationLayout
-from nncf.torch.layers import NNCFConv2d
 from nncf.torch.layers import register_module
 from nncf.torch.model_transformer import PTModelTransformer
 from nncf.torch.module_operations import BaseOp
@@ -201,7 +201,7 @@ class TestInsertionCommands:
             self.to_device = device
 
     @pytest.mark.parametrize("target_point", available_points)
-    @pytest.mark.parametrize("multidevice", (False, True))
+    @pytest.mark.parametrize("multidevice", (False, pytest.param(True, marks=pytest.mark.cuda)))
     @pytest.mark.parametrize("hook", (lambda x: x, BaseOpWithParam(lambda x: x).cpu()))
     def test_pt_insertion_command(self, target_point: PTTargetPoint, multidevice: bool, hook):
         model = wrap_model(InsertionPointTestModel(), torch.ones([1, 1, 10, 10]))
@@ -369,9 +369,33 @@ class TestInsertionCommands:
 
 
 MERGE_PATTERN_TEST_CASES = (
-    [get_mock_model_graph_with_mergeable_pattern, "basic_pattern"],
-    [get_mock_model_graph_with_no_mergeable_pattern, "no_pattern"],
-    [get_mock_model_graph_with_broken_output_edge_pattern, "broken_output_edges_pattern"],
+    [
+        partial(
+            get_mock_model_graph_with_mergeable_pattern,
+            conv2d_metatype=om.PTConv2dMetatype,
+            batchnorm_metatype=om.PTBatchNormMetatype,
+            relu_metatype=om.PTRELUMetatype,
+        ),
+        "basic_pattern",
+    ],
+    [
+        partial(
+            get_mock_model_graph_with_no_mergeable_pattern,
+            conv2d_metatype=om.PTConv2dMetatype,
+            batchnorm_metatype=om.PTBatchNormMetatype,
+            relu_metatype=om.PTRELUMetatype,
+        ),
+        "no_pattern",
+    ],
+    [
+        partial(
+            get_mock_model_graph_with_broken_output_edge_pattern,
+            conv2d_metatype=om.PTConv2dMetatype,
+            batchnorm_metatype=om.PTBatchNormMetatype,
+            relu_metatype=om.PTRELUMetatype,
+        ),
+        "broken_output_edges_pattern",
+    ],
 )
 
 
@@ -474,6 +498,7 @@ class TestInsertionPointGraph:
         from nncf.torch.graph.operator_metatypes import PTMaxPool2dMetatype
         from nncf.torch.graph.operator_metatypes import PTModuleBatchNormMetatype
         from nncf.torch.graph.operator_metatypes import PTModuleConvTranspose2dMetatype
+        from nncf.torch.graph.operator_metatypes import PTModuleDepthwiseConv2dSubtype
         from nncf.torch.graph.operator_metatypes import PTModuleLinearMetatype
         from nncf.torch.graph.operator_metatypes import PTRELUMetatype
         from nncf.torch.graph.operator_metatypes import PTTransposeMetatype
@@ -491,8 +516,8 @@ class TestInsertionPointGraph:
             ),
             "ModelForMetatypeTesting/conv_transpose2d_0": PTConvTranspose2dMetatype,
             "ModelForMetatypeTesting/__add___0": PTAddMetatype,
-            "ModelForMetatypeTesting/NNCFConv2d[conv_depthwise]/conv2d_0": PTDepthwiseConv2dSubtype,
-            "ModelForMetatypeTesting/conv2d_0": PTConv2dMetatype,
+            "ModelForMetatypeTesting/NNCFConv2d[conv_depthwise]/conv2d_0": PTModuleDepthwiseConv2dSubtype,
+            "ModelForMetatypeTesting/conv2d_0": PTDepthwiseConv2dSubtype,
             "ModelForMetatypeTesting/__iadd___0": PTAddMetatype,
             "ModelForMetatypeTesting/AdaptiveAvgPool2d[adaptive_avg_pool]/adaptive_avg_pool2d_0": PTAvgPool2dMetatype,
             "ModelForMetatypeTesting/flatten_0": PTReshapeMetatype,
@@ -572,18 +597,16 @@ class TestInsertionPointGraph:
         assert Counter(sanitized_loaded_edges) == Counter(list(merged_ip_graph.edges))
 
 
-def test_extraction_with_fused_bias_transformations():
-    model = NNCFNetwork(InsertionPointTestModel(), FillerInputInfo([FillerInputElement([1, 1, 10, 10])]))
+def test_extraction_model_transformations():
+    model = wrap_model(InsertionPointTestModel(), torch.ones([1, 1, 10, 10]), trace_parameters=True)
     model_transformer = PTModelTransformer(model)
 
-    command = PTModelExtractionWithFusedBiasCommand("InsertionPointTestModel/NNCFConv2d[conv1]/conv2d_0")
+    command = PTModelExtractionCommand(
+        ["InsertionPointTestModel/Conv2d[conv1]/conv2d_0"], ["InsertionPointTestModel/Conv2d[conv1]/conv2d_0"]
+    )
     transformation_layout = PTTransformationLayout()
     transformation_layout.register(command)
-    extracted_model = model_transformer.transform(transformation_layout)
-
-    assert isinstance(extracted_model, nn.Sequential)
-    assert len(extracted_model) == 1
-    assert isinstance(extracted_model[0], NNCFConv2d)
+    model_transformer.transform(transformation_layout)
 
 
 @pytest.mark.parametrize(
@@ -591,10 +614,10 @@ def test_extraction_with_fused_bias_transformations():
     [(PTBiasCorrectionCommand, "bias", torch.tensor([42.0])), (PTWeightUpdateCommand, "weight", torch.tensor([42.0]))],
 )
 def test_correction_transformations(command_cls, attr_name, new_value):
-    model = NNCFNetwork(InsertionPointTestModel(), FillerInputInfo([FillerInputElement([1, 1, 10, 10])]))
+    model = wrap_model(InsertionPointTestModel(), torch.ones([1, 1, 10, 10]), trace_parameters=True)
     model_transformer = PTModelTransformer(model)
 
-    target_point = PTTargetPoint(TargetType.LAYER, "InsertionPointTestModel/NNCFConv2d[conv1]/conv2d_0")
+    target_point = PTTargetPoint(TargetType.LAYER, "InsertionPointTestModel/Conv2d[conv1]/conv2d_0")
     command = command_cls(target_point, new_value)
 
     transformation_layout = PTTransformationLayout()
@@ -660,18 +683,14 @@ SHARED_FN_TARGET_POINTS = (
 def test_create_quantizer_insertion_command(target_point):
     hook = Hook()
     command = create_quantizer_insertion_command(target_point, hook)
-
     assert command.fn is hook
-    if target_point.type is TargetType.OPERATION_WITH_WEIGHTS:
-        assert isinstance(command, PTInsertionCommand)
-    else:
-        quantizer_id = NonWeightQuantizerId(target_point.target_node_name, target_point.input_port_id)
-        assert isinstance(command, PTSharedFnInsertionCommand)
-        assert command.target_points == [target_point]
-        assert command.fn is hook
-        storage_key = str(quantizer_id)
-        assert command.op_name == storage_key
-        assert command.compression_module_type is ExtraCompressionModuleType.EXTERNAL_QUANTIZER
+    quantizer_id = NonWeightQuantizerId(target_point.target_node_name, target_point.input_port_id)
+    assert isinstance(command, PTSharedFnInsertionCommand)
+    assert command.target_points == [target_point]
+    assert command.fn is hook
+    storage_key = str(quantizer_id)
+    assert command.op_name == storage_key
+    assert command.compression_module_type is ExtraCompressionModuleType.EXTERNAL_QUANTIZER
 
 
 def test_create_shared_quantizer_insertion_command():
@@ -696,7 +715,7 @@ def test_create_shared_quantizer_insertion_command():
     "priority", [TransformationPriority.FP32_TENSOR_STATISTICS_OBSERVATION, TransformationPriority.DEFAULT_PRIORITY]
 )
 @pytest.mark.parametrize("compression_module_registered", [False, True])
-@pytest.mark.parametrize("multidevice_model", (False, True))
+@pytest.mark.parametrize("multidevice_model", (False, pytest.param(True, marks=pytest.mark.cuda)))
 def test_shared_fn_insertion_point(
     priority, compression_module_registered, compression_module_type, multidevice_model, mocker
 ):
@@ -786,7 +805,7 @@ def test_shared_fn_insertion_point(
     "priority", [TransformationPriority.FP32_TENSOR_STATISTICS_OBSERVATION, TransformationPriority.DEFAULT_PRIORITY]
 )
 @pytest.mark.parametrize("compression_module_registered", [False, True])
-@pytest.mark.parametrize("multidevice_model", (False, True))
+@pytest.mark.parametrize("multidevice_model", (False, pytest.param(True, marks=pytest.mark.cuda)))
 def test_shared_fn_insertion_command_several_module_types(
     priority, compression_module_registered, multidevice_model, mocker
 ):

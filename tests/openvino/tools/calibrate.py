@@ -14,6 +14,8 @@ import functools
 import json
 import multiprocessing
 import os
+import platform
+import subprocess
 from argparse import ArgumentParser
 from collections import OrderedDict
 from collections import defaultdict
@@ -26,6 +28,7 @@ from typing import Any, Dict, Iterable, List, Optional, TypeVar
 
 import numpy as np
 import openvino.runtime as ov
+import pkg_resources
 from config import Config
 from openvino.runtime import Dimension
 from openvino.runtime import PartialShape
@@ -33,12 +36,15 @@ from openvino.runtime import PartialShape
 try:
     from accuracy_checker.evaluators.quantization_model_evaluator import ModelEvaluator
     from accuracy_checker.evaluators.quantization_model_evaluator import create_model_evaluator
+    from accuracy_checker.utils import extract_image_representations
 except ImportError:
     from openvino.tools.accuracy_checker.evaluators.quantization_model_evaluator import ModelEvaluator
     from openvino.tools.accuracy_checker.evaluators.quantization_model_evaluator import create_model_evaluator
+    from openvino.tools.accuracy_checker.utils import extract_image_representations
 
 import nncf
 from nncf.common.deprecation import warning_deprecated
+from nncf.common.logging import nncf_logger
 from nncf.common.logging.logger import set_log_file
 from nncf.common.quantization.structs import QuantizationPreset
 from nncf.common.quantization.structs import QuantizationScheme
@@ -347,7 +353,7 @@ def map_ignored_scope(ignored):
             if op.get("attributes") is not None:
                 raise ValueError('"attributes" in the ignored operations ' "are not supported")
             ignored_operations.append(op["type"])
-    return {"ignored_scope": IgnoredScope(names=ignored.get("scope"), types=ignored_operations)}
+    return {"ignored_scope": IgnoredScope(names=ignored.get("scope", []), types=ignored_operations)}
 
 
 def map_preset(preset):
@@ -835,8 +841,8 @@ def maybe_reshape_model(model, dataset, subset_size, input_to_tensor_name):
 
 
 def get_transform_fn(model_evaluator: ModelEvaluator, ov_model):
-    if model_evaluator.launcher._lstm_inputs:
-        compiled_original_model = ov.Core().compile_model(ov_model)
+    if isinstance(model_evaluator, ModelEvaluator) and model_evaluator.launcher._lstm_inputs:
+        compiled_original_model = ov.Core().compile_model(ov_model, device_name="CPU")
         model_outputs = None
 
         def transform_fn(data_item: ACDattasetWrapper.DataItem):
@@ -889,34 +895,46 @@ class ACDattasetWrapper:
         self.batch_size = self.model_evaluator.dataset.batch
 
     def __iter__(self):
-        for sequence in self.model_evaluator.dataset:
-            _, batch_annotation, batch_input, _ = sequence
-            filled_inputs, _, _ = self.model_evaluator._get_batch_input(batch_input, batch_annotation)
-            for idx, filled_input in enumerate(filled_inputs):
-                input_data = {}
-                for name, value in filled_input.items():
-                    input_data[self.model_evaluator.launcher.input_to_tensor_name[name]] = value
-                status = self.Status.SEQUENCE_IS_GOING
-                if idx == len(filled_inputs) - 1:
-                    status = self.Status.END_OF_SEQUENCE
-                yield self.DataItem(input_data, status)
+        if isinstance(self.model_evaluator, ModelEvaluator):
+            for sequence in self.model_evaluator.dataset:
+                _, batch_annotation, batch_input, _ = sequence
+                filled_inputs, _, _ = self.model_evaluator._get_batch_input(batch_input, batch_annotation)
+                for idx, filled_input in enumerate(filled_inputs):
+                    input_data = {}
+                    for name, value in filled_input.items():
+                        input_data[self.model_evaluator.launcher.input_to_tensor_name[name]] = value
+                    status = self.Status.SEQUENCE_IS_GOING
+                    if idx == len(filled_inputs) - 1:
+                        status = self.Status.END_OF_SEQUENCE
+                    yield self.DataItem(input_data, status)
+        else:
+            for sequence in self.model_evaluator.dataset:
+                _, batch_annotation, batch_input, _ = sequence
+                batch_inputs = self.model_evaluator._internal_module.preprocessor.process(batch_input, batch_annotation)
+                batch_data, _ = extract_image_representations(batch_inputs)
+                input_data = np.expand_dims(batch_data[0], axis=0)
+                yield self.DataItem(input_data, self.Status.END_OF_SEQUENCE)
 
     def __len__(self):
         return len(self.model_evaluator.dataset)
 
     def calculate_per_sample_subset_size(self, sequence_subset_size):
-        subset_size = 0
-        for data_item in islice(self.model_evaluator.dataset, sequence_subset_size):
-            _, batch_annotation, batch_input, _ = data_item
-            filled_inputs, _, _ = self.model_evaluator._get_batch_input(batch_input, batch_annotation)
-            subset_size += len(filled_inputs)
-        return subset_size
+        if isinstance(self.model_evaluator, ModelEvaluator):
+            subset_size = 0
+            for data_item in islice(self.model_evaluator.dataset, sequence_subset_size):
+                _, batch_annotation, batch_input, _ = data_item
+                filled_inputs, _, _ = self.model_evaluator._get_batch_input(batch_input, batch_annotation)
+                subset_size += len(filled_inputs)
+            return subset_size
+        else:
+            return sequence_subset_size
 
 
 def quantize_model(xml_path, bin_path, accuracy_checker_config, quantization_parameters):
     ov_model = ov.Core().read_model(model=xml_path, weights=bin_path)
     model_evaluator = create_model_evaluator(accuracy_checker_config)
-    model_evaluator.load_network([{"model": ov_model}])
+    if isinstance(model_evaluator, ModelEvaluator):
+        model_evaluator.load_network([{"model": ov_model}])
     model_evaluator.select_dataset("")
 
     advanced_parameters = quantization_parameters.get("advanced_parameters", AdvancedQuantizationParameters())
@@ -1062,6 +1080,67 @@ def update_nncf_algorithms_config(nncf_algorithms_config: Dict[str, Dict[str, An
         print(f"Updated subset_size value for {nncf_method} method to {new_subset_size} ")
 
 
+class EnvInfo:
+
+    @staticmethod
+    def print_info() -> None:
+        """
+        Prints NNCF version, python version and CPU model name.
+        """
+        python_version = EnvInfo._get_python_version()
+        nncf_version = EnvInfo._get_nncf_version()
+        cpu_model = EnvInfo._get_cpu_model()
+
+        nncf_logger.info(f"Python version: {python_version}")
+        nncf_logger.info(f"NNCF version: {nncf_version}")
+        nncf_logger.info(f"CPU model: {cpu_model}")
+
+    @staticmethod
+    def _get_nncf_version() -> str:
+        try:
+            version = pkg_resources.get_distribution("nncf").version
+        except pkg_resources.DistributionNotFound:
+            version = "Unknown"
+        return version
+
+    @staticmethod
+    def _get_python_version() -> str:
+        return platform.python_version()
+
+    @staticmethod
+    def _get_cpu_model() -> str:
+        """
+        Returns CPU device name.
+        """
+
+        def _get_cpu_model_name_linux_os() -> str:
+            try:
+                output = subprocess.check_output("lscpu", shell=True)
+                for line in output.decode().splitlines():
+                    if "Model name:" in line:
+                        return line.split(":")[1].strip()
+                return "Unknown"
+            except Exception:
+                return "Unknown"
+
+        def _get_cpu_model_name_windows() -> str:
+            try:
+                output = subprocess.check_output("wmic cpu get name", shell=True)
+                return output.decode().splitlines()[1].strip()
+            except Exception:
+                return "Unknown"
+
+        os_name = platform.system()
+
+        cpu_model = "Unknown"
+        if os_name == "Linux":
+            cpu_model = _get_cpu_model_name_linux_os()
+        elif os_name == "Windows":
+            cpu_model = _get_cpu_model_name_windows()
+
+        return cpu_model
+
+
 def main():
     args = parse_args()
     if args.impl is not None:
@@ -1080,6 +1159,8 @@ def main():
     set_log_file(f"{args.output_dir}/log.txt")
     output_dir = os.path.join(args.output_dir, "optimized")
     os.makedirs(output_dir, exist_ok=True)
+
+    EnvInfo.print_info()
 
     algo_name_to_method_map = {
         "quantize": quantize_model,

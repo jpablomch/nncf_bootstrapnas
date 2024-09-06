@@ -196,9 +196,44 @@ def get_fused_bias_value(node: NNCFNode, model: NNCFNetwork) -> Optional[torch.T
     """
     nncf_graph = model.nncf.get_graph()
     fused_node = get_potential_fused_node(node.node_name, nncf_graph)
-    target_node_name = fused_node.node_name if fused_node else node.node_name
+    bias = get_const_data_on_port(node, node.metatype.bias_port_id, model)
+
+    if fused_node is None:
+        return bias
+
+    fused_bias = get_const_data_on_port(fused_node, fused_node.metatype.bias_port_id, model)
+    if bias is None:
+        return fused_bias
+
+    fused_weight = get_const_data_on_port(fused_node, fused_node.metatype.weight_port_ids[0], model)
+    return bias * fused_weight + fused_bias
+
+
+def update_fused_bias(target_node_name: str, new_bias: torch.Tensor, model: NNCFNetwork) -> None:
+    """
+    Update bias for target module or potential fused module.
+
+    :param target_node_name: The target node name.
+    :param new_bias: New bias value.
+    :param model: The model.
+    """
+    nncf_graph = model.nncf.get_graph()
     target_node = nncf_graph.get_node_by_name(target_node_name)
-    return get_const_data_on_port(target_node, target_node.metatype.bias_port_id, model)
+    fused_node = get_potential_fused_node(target_node_name, nncf_graph)
+    if fused_node is None:
+        set_const_data_to_port_id(new_bias, target_node, target_node.metatype.bias_port_id, model)
+        return
+
+    target_bias_node = get_const_node(target_node, target_node.metatype.bias_port_id, nncf_graph)
+    fused_bias_node = get_const_node(fused_node, fused_node.metatype.bias_port_id, nncf_graph)
+    fused_weight_node = get_const_node(fused_node, fused_node.metatype.weight_port_ids[0], nncf_graph)
+
+    if target_bias_node is None:
+        set_const_data(new_bias, fused_bias_node, model)
+        return
+
+    new_bias = new_bias - get_const_data(target_bias_node, model) * get_const_data(fused_weight_node, model)
+    set_const_data(new_bias, fused_bias_node, model)
 
 
 def get_weight_tensor_port_ids(node: NNCFNode, graph: NNCFGraph) -> List[int]:
@@ -302,3 +337,28 @@ def get_fake_quantizer(
             if isinstance(module, BaseQuantizer):
                 return module
     return None
+
+
+def get_weight_channel_axes(metatype: om.PTOperatorMetatype, ndims: int, input_port_id: int) -> Tuple[int, ...]:
+    """
+    Returns axes numbers of the weight tensor which correspond to its channels.
+
+    :param metatype: The node metatype for which the target dimension is being determined.
+    :param input_port_id: The input port id.
+    :return: The target dimension for weight compression.
+    """
+    if metatype == om.PTAddmmMetatype:
+        if input_port_id == 1:
+            return (ndims - 2,)
+        if input_port_id == 2:
+            return (ndims - 1,)
+        raise ValueError(f"Unexpected {input_port_id=} for {metatype=}")
+    if metatype == om.PTMatMulMetatype:
+        if input_port_id == 0:
+            return () if ndims < 2 else (ndims - 2,)
+        if input_port_id == 1:
+            return () if ndims < 2 else (ndims - 1,)
+        raise ValueError(f"Unexpected {input_port_id=} for {metatype=}")
+    if metatype in [om.PTConvTranspose1dMetatype, om.PTConvTranspose2dMetatype, om.PTConvTranspose3dMetatype]:
+        return (1,)
+    return (0,)

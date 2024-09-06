@@ -50,6 +50,10 @@ def post_training_quantization_openvino_mobilenet_v2_quantize() -> Dict[str, flo
 
 
 def post_training_quantization_tensorflow_mobilenet_v2() -> Dict[str, float]:
+    import tensorflow_datasets as tfds
+
+    tfds.display_progress_bar(enable=False)
+
     example_root = str(PROJECT_ROOT / "examples" / "post_training_quantization" / "tensorflow" / "mobilenet_v2")
     return post_training_quantization_mobilenet_v2(example_root)
 
@@ -210,6 +214,27 @@ def set_torch_cuda_seed(seed: int = 42):
     cudnn.benchmark = False
     torch.use_deterministic_algorithms(True)
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
+
+def quantization_aware_training_torch_anomalib():
+    from examples.quantization_aware_training.torch.anomalib.main import main as anomalib_main
+
+    # Set manual seed and determenistic cuda mode to make the test determenistic
+    set_torch_cuda_seed()
+    results = anomalib_main()
+
+    return {
+        "fp32_f1score": float(results[0]),
+        "int8_init_f1score": float(results[1]),
+        "int8_f1score": float(results[2]),
+        "accuracy_drop": float(results[0] - results[2]),
+        "fp32_fps": results[3],
+        "int8_fps": results[4],
+        "performance_speed_up": results[4] / results[3],
+        "fp32_model_size": results[5],
+        "int8_model_size": results[6],
+        "model_compression_rate": results[5] / results[6],
+    }
 
 
 def main(argv):

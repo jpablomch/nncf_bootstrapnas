@@ -74,15 +74,18 @@ from nncf.config.schemata.defaults import QUANTIZATION_OVERFLOW_FIX
 from nncf.config.schemata.defaults import QUANTIZATION_PRESET
 from nncf.config.schemata.defaults import QUANTIZE_INPUTS
 from nncf.config.schemata.defaults import QUANTIZE_OUTPUTS
+from nncf.experimental.common.tensor_statistics.statistics import MinMaxTensorStatistic
+from nncf.experimental.common.tensor_statistics.statistics import TensorStatistic
 from nncf.torch.algo_selector import PT_COMPRESSION_ALGORITHMS
 from nncf.torch.algo_selector import ZeroCompressionLoss
 from nncf.torch.compression_method_api import PTCompressionAlgorithmBuilder
 from nncf.torch.compression_method_api import PTCompressionAlgorithmController
 from nncf.torch.graph.graph import PTNNCFGraph
+from nncf.torch.graph.operator_metatypes import ELEMENTWISE_OPERATIONS
 from nncf.torch.graph.operator_metatypes import UNIFICATION_PRODUCING_METATYPES
 from nncf.torch.graph.operator_metatypes import PTCatMetatype
-from nncf.torch.graph.operator_metatypes import PTDepthwiseConv2dSubtype
 from nncf.torch.graph.operator_metatypes import PTModuleConv2dMetatype
+from nncf.torch.graph.operator_metatypes import PTModuleDepthwiseConv2dSubtype
 from nncf.torch.graph.transformations.commands import ExtraCompressionModuleType
 from nncf.torch.graph.transformations.commands import PTInsertionCommand
 from nncf.torch.graph.transformations.commands import PTTargetPoint
@@ -133,8 +136,6 @@ from nncf.torch.quantization.translator import PTTargetPointTranslator
 from nncf.torch.structures import AutoQPrecisionInitArgs
 from nncf.torch.structures import QuantizationPrecisionInitArgs
 from nncf.torch.tensor_statistics.algo import TensorStatisticsCollectionBuilder
-from nncf.torch.tensor_statistics.statistics import MinMaxTensorStatistic
-from nncf.torch.tensor_statistics.statistics import TensorStatistic
 from nncf.torch.tensor_statistics.statistics import pt_convert_stat_to_min_max_tensor_stat
 from nncf.torch.utils import get_model_device
 from nncf.torch.utils import get_model_dtype
@@ -375,7 +376,7 @@ class PropagationBasedQuantizerSetupGenerator(QuantizerSetupGeneratorBase):
         merged_ip_graph = insertion_point_graph.get_ip_graph_with_merged_hw_optimized_operations(
             self._pattern_fusing_graph
         )
-        quantization_proposal = prop_graph_solver.run_on_ip_graph(merged_ip_graph)
+        quantization_proposal = prop_graph_solver.run_on_ip_graph(merged_ip_graph, ELEMENTWISE_OPERATIONS)
         self._num_potential_quantized_activations = prop_graph_solver.get_num_potential_quantized_activations()
 
         quantizer_setup = deepcopy(quantization_proposal.quantizer_setup)
@@ -829,7 +830,7 @@ class QuantizationBuilder(PTCompressionAlgorithmBuilder):
             if weight_bitwidth:
                 is_applicable = False
                 target_node = target_model_graph.get_node_by_name(op_node_name)
-                if target_node.metatype in [PTModuleConv2dMetatype, PTDepthwiseConv2dSubtype]:
+                if target_node.metatype in [PTModuleConv2dMetatype, PTModuleDepthwiseConv2dSubtype]:
                     layer_attrs = target_node.layer_attributes
                     assert isinstance(layer_attrs, ConvolutionLayerAttributes)
                     padding_values = set(layer_attrs.padding_values)
@@ -1089,14 +1090,14 @@ class QuantizationBuilder(PTCompressionAlgorithmBuilder):
                     continue
 
                 if min_values is None:
-                    min_values = minmax_stat.min_values
+                    min_values = minmax_stat.min_values.data
                 else:
-                    min_values = torch.min(min_values, minmax_stat.min_values)
+                    min_values = torch.min(min_values, minmax_stat.min_values.data)
 
                 if max_values is None:
-                    max_values = minmax_stat.max_values
+                    max_values = minmax_stat.max_values.data
                 else:
-                    max_values = torch.max(max_values, minmax_stat.max_values)
+                    max_values = torch.max(max_values, minmax_stat.max_values.data)
             if min_values is not None and max_values is not None:
                 range_init_minmax_values = min_values, max_values
 
@@ -1150,8 +1151,8 @@ class QuantizationBuilder(PTCompressionAlgorithmBuilder):
             # AMP autocast model (and therefore be FP16 since AMP autocast switches precision of activations
             # at forward pass time)
             own_type = get_model_dtype(target_model)
-            min_values = range_init_minmax_values[0].type(own_type)
-            max_values = range_init_minmax_values[1].type(own_type)
+            min_values = range_init_minmax_values[0].data.type(own_type)
+            max_values = range_init_minmax_values[1].data.type(own_type)
 
             quantizer.apply_minmax_init(min_values=min_values, max_values=max_values, log_module_name=str(primary_ip))
 

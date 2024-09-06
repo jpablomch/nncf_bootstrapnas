@@ -77,3 +77,39 @@ def test_jit_script_exception_preserves_patching_isolated():
     # torch.nn.Module.__call__ is one of the fundamental patched functions, if the code object points to NNCF code,
     # then it means patching is still present
     assert "nncf" in torch.nn.Module.__call__.__code__.co_filename
+
+
+def compile_and_run_test_model(compile_forward: bool) -> torch.Tensor:
+    class TestModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 3, 3)
+
+        def forward(self, x):
+            return self.conv(x)
+
+    model = TestModel()
+
+    torch.manual_seed(0)
+    state_dict = {}
+    for k, v in model.state_dict().items():
+        state_dict[k] = torch.rand(v.shape)
+    model.load_state_dict(state_dict)
+
+    if compile_forward:
+        compiled_model = model
+        compiled_model.forward = torch.compile(model.forward)
+    else:
+        compiled_model = torch.compile(model)
+    assert "_torchdynamo_orig_callable" in compiled_model.forward.__dict__
+    return compiled_model(torch.rand([1, 3, 5, 5]))
+
+
+@pytest.mark.skipif(ISOLATION_RUN_ENV_VAR not in os.environ, reason="Should be run via isolation proxy")
+def test_compile():
+    compile_forward = os.environ.get("COMPILE_FORWARD", None) == "1"
+    before_nncf = compile_and_run_test_model(compile_forward)
+    import nncf.torch  # noqa: F401
+
+    after_nncf = compile_and_run_test_model(compile_forward)
+    assert torch.allclose(before_nncf, after_nncf)

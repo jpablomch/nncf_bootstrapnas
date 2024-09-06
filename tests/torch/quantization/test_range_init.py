@@ -36,6 +36,7 @@ from nncf.common.quantization.structs import QuantizerConfig
 from nncf.common.quantization.structs import QuantizerGroup
 from nncf.config import NNCFConfig
 from nncf.config.structures import QuantizationRangeInitArgs
+from nncf.tensor import Tensor
 from nncf.torch import utils
 from nncf.torch.checkpoint_loading import load_state
 from nncf.torch.initialization import DefaultInitializingDataLoader
@@ -49,7 +50,6 @@ from nncf.torch.quantization.layers import AsymmetricQuantizer
 from nncf.torch.quantization.layers import BaseQuantizer
 from nncf.torch.quantization.layers import PTQuantizerSpec
 from nncf.torch.quantization.layers import SymmetricQuantizer
-from nncf.torch.tensor import PTNNCFTensor
 from nncf.torch.tensor_statistics.statistics import pt_convert_stat_to_min_max_tensor_stat
 from nncf.torch.utils import get_all_modules_by_type
 from nncf.torch.utils import safe_thread_call
@@ -131,6 +131,7 @@ def save_params(model, out_file_path):
         torch.save(gpu_scale_signed_params, out_file)
 
 
+@pytest.mark.cuda
 def test_multiprocessing_distributed_shares_init_scales_signedness_across_gpus(tmp_path, runs_subprocess_in_precommit):
     if not torch.cuda.is_available():
         pytest.skip("Skipping CUDA test cases for CPU only setups")
@@ -1021,10 +1022,10 @@ def test_quantize_range_init_sets_correct_scale_shapes(quantizer_range_init_test
         collector = StatCollectorGenerator.generate_stat_collector_for_range_init_config(
             range_init_config, tuple(quantizer.scale_shape), collector_params
         )
-        collector.register_input_for_all_reducers(PTNNCFTensor(torch.ones(test_struct.input_shape)))
+        collector.register_input_for_all_reducers(Tensor(torch.ones(test_struct.input_shape)))
         stat = collector.get_statistics()
         minmax_values = pt_convert_stat_to_min_max_tensor_stat(stat)
-        quantizer.apply_minmax_init(min_values=minmax_values.min_values, max_values=minmax_values.max_values)
+        quantizer.apply_minmax_init(min_values=minmax_values.min_values.data, max_values=minmax_values.max_values.data)
 
         assert quantizer.scale_shape == test_struct.ref_scale_shape
         if quantization_mode == QuantizationMode.SYMMETRIC:

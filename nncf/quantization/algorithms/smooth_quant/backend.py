@@ -21,7 +21,7 @@ from nncf.common.graph.transformations.commands import TargetType
 from nncf.common.graph.transformations.commands import TransformationCommand
 from nncf.common.tensor_statistics.statistic_point import StatisticPoint
 from nncf.experimental.common.tensor_statistics.collectors import TensorCollector
-from nncf.experimental.tensor import Tensor
+from nncf.tensor import Tensor
 
 TModel = TypeVar("TModel")
 TTensor = TypeVar("TTensor")
@@ -113,24 +113,15 @@ class SmoothQuantAlgoBackend(ABC):
 
     @staticmethod
     @abstractmethod
-    def get_weight_value(node_with_weight: NNCFNode, model: TModel, port_id: int) -> Tensor:
+    def get_weight_value(node_with_weight: NNCFNode, model: TModel, port_id: int, nncf_graph: NNCFGraph) -> Tensor:
         """
         Returns the weight value for the node with weight.
 
         :param node_with_weight: The node with weight.
         :param model: The model that contains this operation.
         :param port_id: The input port ID to get weight input.
+        :param nncf_graph: NNCFGraph instance.
         :return: The weight value.
-        """
-
-    @staticmethod
-    @abstractmethod
-    def get_weight_tensor_port_id(node: NNCFNode) -> int:
-        """
-        Returns node's input port indices with weights tensors.
-
-        :param node: NNCFNode to find its weights input port indices.
-        :return: Weights input port indices.
         """
 
     @staticmethod

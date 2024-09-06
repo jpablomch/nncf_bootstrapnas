@@ -19,8 +19,9 @@ from nncf.common.graph.operator_metatypes import OperatorMetatype
 from nncf.common.graph.transformations.commands import TargetPoint
 from nncf.common.graph.transformations.commands import TargetType
 from nncf.common.tensor_statistics.collectors import TensorStatisticCollectorBase
-from nncf.experimental.tensor import Tensor
 from nncf.quantization.algorithms.weight_compression.config import WeightCompressionParameters
+from nncf.tensor import Tensor
+from nncf.tensor import TensorDataType
 
 TModel = TypeVar("TModel")
 
@@ -94,6 +95,32 @@ class WeightCompressionAlgoBackend(ABC):
         """
 
     @abstractmethod
+    def get_weight_dtype(
+        self, node_with_weight: NNCFNode, weight_port_id: int, model: TModel, graph: NNCFGraph
+    ) -> TensorDataType:
+        """
+        Returns a weight data type associated with the given node on the given port id.
+
+        :param node_with_weight: The node with weight.
+        :param weight_port_id: The weight port id for given node with weight.
+        :param model: The model.
+        :param graph: The model graph associated with the model.
+        :return: The weight data type.
+        """
+
+    @staticmethod
+    @abstractmethod
+    def get_weight_shape(node_with_weight: NNCFNode, weight_port_id: int, graph: NNCFGraph) -> Tuple:
+        """
+        Returns a weight shape associated with the given node on the given port id.
+
+        :param node_with_weight: The node with weight.
+        :param weight_port_id: The weight port id for given node with weight.
+        :param graph: The model graph associated with the model.
+        :return: The weight shape.
+        """
+
+    @abstractmethod
     def set_weight(
         self, node_with_weight: NNCFNode, weight_port_id: int, model: TModel, graph: NNCFGraph, weight: Tensor
     ) -> None:
@@ -109,7 +136,12 @@ class WeightCompressionAlgoBackend(ABC):
 
     @abstractmethod
     def transform_model(
-        self, model: TModel, graph: NNCFGraph, weight_compression_parameters: Iterable[WeightCompressionParameters]
+        self,
+        model: TModel,
+        graph: NNCFGraph,
+        weight_compression_parameters: Iterable[WeightCompressionParameters],
+        precomputed_scales: Dict[str, Tensor] = None,
+        precomputed_zero_points: Dict[str, Tensor] = None,
     ) -> TModel:
         """
         Applies weight compression transformations to the model.
@@ -117,7 +149,37 @@ class WeightCompressionAlgoBackend(ABC):
         :param model: Model in which the weights will be compressed according to the weight compression description.
         :param graph: The graph associated with the model.
         :param weight_compression_parameters: List of weight compression parameters.
+        :param precomputed_scales: Precomputed scales for weights compression.
+        :param precomputed_zero_points: Precomputed zero points for weights compression.
         :return: The transformed model.
+        """
+
+    @abstractmethod
+    def insert_adapters(
+        self, wc_params: WeightCompressionParameters, lora_A: Tensor, lora_B: Tensor, int8_lora: bool
+    ) -> None:
+        """
+        Expands a model's execution graph following the Low-Rank Adaptation (LoRA) concept.
+
+        It inserts two additional Linear layers with weight matrices of low rank that are executed in parallel to the
+        target Linear layer.
+
+        Before insertion:
+
+            ----INPUT
+                   \
+                   orig.MM--------------------------------OUTPUT
+
+        After insertion:
+
+            ----INPUT ----lora_A.MM----lora_B.MM----\
+                  \                                add----OUTPUT
+                   orig.MM--------------------------/
+
+        :param wc_params: Parameters for weight compression.
+        :param lora_A: weights for the first LoRA matrix.
+        :param lora_B: weights for the second LoRA matrix.
+        :param int8_lora: indicates whether the LoRA matrices should be compressed to 8-bit.
         """
 
     @staticmethod
@@ -174,4 +236,10 @@ class AWQAlgoBackend(WeightCompressionAlgoBackend):
     def get_awq_patterns() -> Dict:
         """
         Returns patterns of nodes in network graph for applying AWQ algorithm.
+        """
+
+    @staticmethod
+    def scale_insertion_command(source_node, next_nodes, source_node_output_port, scale):
+        """
+        Returns scale insertion command/transformation for applying AWQ algorithm.
         """
