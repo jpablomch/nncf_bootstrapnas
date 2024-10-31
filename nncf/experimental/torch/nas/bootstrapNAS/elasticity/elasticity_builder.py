@@ -152,3 +152,18 @@ class ElasticityBuilder(PTCompressionAlgorithmBuilder):
 
         # No conflict resolving with the related config options, parameters are overridden by compression state
         self._available_elasticity_dims = list(map(ElasticityDim, available_elasticity_dims_state))
+
+    def _are_frozen_layers_allowed(self):
+        """
+        Determine if frozen layers are permissible based on the NNCF configuration.
+        Frozen layers are allowed when using the Neural Lora Search algorithm.
+
+        :return: A tuple where the first element is a boolean indicating whether frozen layers are allowed,
+                 and the second element is a string message providing the rationale.
+        """
+        frozen_layers_allowed = (
+            self.config.get("bootstrapNAS", {}).get("training", {}).get("algorithm") == "neural_lora_search"
+        )
+        if frozen_layers_allowed:
+            return True, "Frozen layers are allowed under the `Neural Lora Search` algorithm"
+        return super()._are_frozen_layers_allowed()

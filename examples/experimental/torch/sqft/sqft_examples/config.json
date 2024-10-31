@@ -1,0 +1,34 @@
+{
+    "input_info": [
+        {
+            "sample_size": [1, 256],
+            "type": "long",
+            "keyword": "input_ids"
+        },
+        {
+            "sample_size": [1, 256],
+            "type": "long",
+            "keyword": "attention_mask"
+        }
+    ],
+    "bootstrapNAS": {
+        "training": {
+            "algorithm": "neural_lora_search",
+            "elasticity": {
+                "available_elasticity_dims": ["width"],
+                "width": {
+                    "overwrite_groups": [
+                        [
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/LlamaForCausalLM[model]/LlamaModel[model]/ModuleList[layers]/LlamaDecoderLayer[{*}]/LlamaSdpaAttention[self_attn]/Linear[q_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/LlamaForCausalLM[model]/LlamaModel[model]/ModuleList[layers]/LlamaDecoderLayer[{*}]/LlamaSdpaAttention[self_attn]/Linear[k_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/LlamaForCausalLM[model]/LlamaModel[model]/ModuleList[layers]/LlamaDecoderLayer[{*}]/LlamaSdpaAttention[self_attn]/Linear[v_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ]
+                    ],
+                    "overwrite_groups_widths": [
+                        [-1]
+                    ]
+                }
+            }
+        }
+    }
+}
