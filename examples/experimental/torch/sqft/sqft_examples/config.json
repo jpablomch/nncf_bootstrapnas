@@ -11,7 +11,7 @@
             "keyword": "attention_mask"
         }
     ],
-    "bootstrapNAS": {
+    "SQFT": {
         "training": {
             "algorithm": "neural_lora_search",
             "elasticity": {

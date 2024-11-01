@@ -41,12 +41,13 @@ try:
     from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
         create_compressed_model_from_algo_names,
     )
+    from nncf.experimental.torch.sqft import *
     from nncf.torch.model_creation import create_nncf_network
 
     is_nncf_available = True
 except ImportError:
     is_nncf_available = False
-    logger.info("NNCF is not installed. Please install it.")
+    logger.warning("NNCF is not installed. Please install it.")
 
 
 def parse_nncf_config(nncf_config_path, num_hidden_layers=1, search_space=None, learning_rate=3e-4, num_epochs=3):
@@ -65,8 +66,8 @@ def parse_nncf_config(nncf_config_path, num_hidden_layers=1, search_space=None, 
     with safe_open(Path(nncf_config_path)) as file:
         loaded_json = json.load(file)
 
-    base_overwrite_groups = loaded_json["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups"]
-    base_overwrite_groups_widths = loaded_json["bootstrapNAS"]["training"]["elasticity"]["width"][
+    base_overwrite_groups = loaded_json["SQFT"]["training"]["elasticity"]["width"]["overwrite_groups"]
+    base_overwrite_groups_widths = loaded_json["SQFT"]["training"]["elasticity"]["width"][
         "overwrite_groups_widths"
     ]
     overwrite_groups, overwrite_groups_widths = [], []
@@ -83,11 +84,11 @@ def parse_nncf_config(nncf_config_path, num_hidden_layers=1, search_space=None, 
         overwrite_groups.extend(new_group)
         overwrite_groups_widths.extend(new_width)
 
-    loaded_json["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups"] = overwrite_groups
-    loaded_json["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups_widths"] = overwrite_groups_widths
+    loaded_json["SQFT"]["training"]["elasticity"]["width"]["overwrite_groups"] = overwrite_groups
+    loaded_json["SQFT"]["training"]["elasticity"]["width"]["overwrite_groups_widths"] = overwrite_groups_widths
 
     # Add learning rate and epochs to the configuration
-    loaded_json["bootstrapNAS"]["training"]["schedule"] = {
+    loaded_json["SQFT"]["training"]["schedule"] = {
         "list_stage_descriptions": [
             {
                 "train_dims": ["width"],
@@ -259,7 +260,7 @@ def main():
 
         if nncf_config is not None:
             nncf_network = create_nncf_network(model, nncf_config)
-            algo_name = nncf_config.get("bootstrapNAS", {}).get("training", {}).get("algorithm", "neural_lora_search")
+            algo_name = nncf_config.get("SQFT", {}).get("training", {}).get("algorithm", "neural_lora_search")
             compression_ctrl, model = create_compressed_model_from_algo_names(
                 nncf_network, nncf_config, algo_names=[algo_name]
             )

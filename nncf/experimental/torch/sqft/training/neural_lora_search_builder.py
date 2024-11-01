@@ -12,8 +12,8 @@ from typing import Any, Dict, Tuple
 
 from nncf import NNCFConfig
 from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_builder import ElasticityBuilder
-from nncf.experimental.torch.sqft.neural_lora_search_controller import NeuralLoraSearchController
 from nncf.experimental.torch.nas.bootstrapNAS.training.scheduler import NASSchedulerParams
+from nncf.experimental.torch.sqft.training.neural_lora_search_controller import NeuralLoraSearchController
 from nncf.torch.algo_selector import PT_COMPRESSION_ALGORITHMS
 from nncf.torch.algo_selector import ZeroCompressionLoss
 from nncf.torch.compression_method_api import PTCompressionAlgorithmBuilder
@@ -49,7 +49,7 @@ class NeuralLoraSearchBuilder(PTCompressionAlgorithmBuilder):
         """
 
     def _get_algo_specific_config_section(self) -> Dict:
-        return self.config.get("bootstrapNAS", {}).get("training", {})
+        return self.config.get("SQFT", {}).get("training", {})
 
     def _build_controller(self, model: NNCFNetwork) -> "NeuralLoraSearchController":
         elasticity_ctrl = self._elasticity_builder.build_controller(model)

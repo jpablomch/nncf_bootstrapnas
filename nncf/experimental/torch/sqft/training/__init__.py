@@ -8,6 +8,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-# noqa
-from nncf.experimental.torch.sqft.training import neural_lora_search_builder as nls_algo

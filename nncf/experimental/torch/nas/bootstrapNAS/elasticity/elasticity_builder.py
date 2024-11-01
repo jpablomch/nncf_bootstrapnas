@@ -82,7 +82,9 @@ class ElasticityBuilder(PTCompressionAlgorithmBuilder):
         return self._available_elasticity_dims
 
     def _get_algo_specific_config_section(self) -> Dict:
-        return self.config.get("bootstrapNAS", {}).get("training", {}).get("elasticity", {})
+        return (self.config.get("bootstrapNAS", {}).get("training", {}).get("elasticity", {}) or
+                self.config.get("SQFT", {}).get("training", {}).get("elasticity", {}))
+
 
     def _build_controller(self, model: NNCFNetwork) -> "ElasticityController":
         """
@@ -156,13 +158,13 @@ class ElasticityBuilder(PTCompressionAlgorithmBuilder):
     def _are_frozen_layers_allowed(self):
         """
         Determine if frozen layers are permissible based on the NNCF configuration.
-        Frozen layers are allowed when using the Neural Lora Search algorithm.
+        Frozen layers are allowed when using the Neural Lora Search algorithm in SQFT.
 
         :return: A tuple where the first element is a boolean indicating whether frozen layers are allowed,
                  and the second element is a string message providing the rationale.
         """
         frozen_layers_allowed = (
-            self.config.get("bootstrapNAS", {}).get("training", {}).get("algorithm") == "neural_lora_search"
+            self.config.get("SQFT", {}).get("training", {}).get("algorithm") == "neural_lora_search"
         )
         if frozen_layers_allowed:
             return True, "Frozen layers are allowed under the `Neural Lora Search` algorithm"
