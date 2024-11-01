@@ -19,9 +19,9 @@
                 "width": {
                     "overwrite_groups": [
                         [
-                            "{re}PeftModelForCausalLM/LoraModel[base_model]/LlamaForCausalLM[model]/LlamaModel[model]/ModuleList[layers]/LlamaDecoderLayer[{*}]/LlamaSdpaAttention[self_attn]/Linear[q_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
-                            "{re}PeftModelForCausalLM/LoraModel[base_model]/LlamaForCausalLM[model]/LlamaModel[model]/ModuleList[layers]/LlamaDecoderLayer[{*}]/LlamaSdpaAttention[self_attn]/Linear[k_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
-                            "{re}PeftModelForCausalLM/LoraModel[base_model]/LlamaForCausalLM[model]/LlamaModel[model]/ModuleList[layers]/LlamaDecoderLayer[{*}]/LlamaSdpaAttention[self_attn]/Linear[v_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/MistralForCausalLM[model]/MistralModel[model]/ModuleList[layers]/MistralDecoderLayer[{*}]/MistralSdpaAttention[self_attn]/Linear[q_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/MistralForCausalLM[model]/MistralModel[model]/ModuleList[layers]/MistralDecoderLayer[{*}]/MistralSdpaAttention[self_attn]/Linear[k_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/MistralForCausalLM[model]/MistralModel[model]/ModuleList[layers]/MistralDecoderLayer[{*}]/MistralSdpaAttention[self_attn]/Linear[v_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
                         ]
                     ],
                     "overwrite_groups_widths": [

@@ -83,7 +83,7 @@ python run_sqft.py \
     --lora_alpha 16 \
     --lora_dropout 0.05 \
     --target_modules q_proj,k_proj,v_proj \
-    --nncf_config <path to this repo>/nls_examples/config.json \
+    --nncf_config sqft_examples/config.json \
     --search_space 8,6,4
 ```
 
