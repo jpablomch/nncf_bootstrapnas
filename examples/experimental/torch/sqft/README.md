@@ -5,7 +5,7 @@ This innovative approach facilitates effective model adaptation and manipulation
 The implementation of SQFT is supported by the Neural Network Compression Framework (NNCF). 
 For detailed documentation on the implementation, please refer to the [SQFT Documentation](../../../../nncf/experimental/torch/sqft/SQFT.md).
 To help you get started with SQFT, we have prepared a comprehensive quickstart guide. 
-This [Quickstart Guide](./Quickstart.md) provides a step-by-step example of how to fine-tune a model using SQFT.
+This [Quickstart Guide](./README.md) provides a step-by-step example of how to fine-tune a model using SQFT.
 
 ## NNCF and PyTorch
 
