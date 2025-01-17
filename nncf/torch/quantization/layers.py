@@ -324,6 +324,7 @@ class BaseQuantizer(nn.Module, StatefullModuleInterface, ABC):
         super().__init__()
         self._qspec = qspec
         self.lora_rank = self._qspec.lora_rank
+        self.activated_lora_rank = self.lora_rank
         self.group_size = self._qspec.group_size
         self.module_name = self._qspec.module_name
         self._narrow_range = qspec.narrow_range
@@ -951,6 +952,7 @@ class FQLoRA_asym(torch.autograd.Function):
         input_ = input_.reshape(group_shape)  # NOTE: careful with what you reshape here!
 
         output = common_forward(input_, input_low, input_range, levels)
+        output = output.to(W.dtype)
 
         # Save tensors for backward pass
         ctx.save_for_backward(A, B, input_, output, input_low, input_range)
@@ -1160,6 +1162,9 @@ class AsymmetricQuantizer(BaseQuantizer):
         scaled_num_bits = 1 if self._half_range else 0
         self.level_low, self.level_high = calculate_asymmetric_level_ranges(self.num_bits - scaled_num_bits)
 
+    def activate_sub_adapter(self, rank):
+        self.activated_lora_rank = rank
+
     def quantize(self, x, execute_traced_op_as_identity: bool = False):
         # return asymmetric_quantize(
         #     x,
@@ -1173,11 +1178,15 @@ class AsymmetricQuantizer(BaseQuantizer):
         # )
         device = x.device
         self.to(device)
+
+        A = self._lora_A[:self.activated_lora_rank, :]
+        B = self._lora_B[:, :self.activated_lora_rank]
+
         fq_weight = asym_fq_lora(
             x,
             self._qspec.weight_shape,
-            self._lora_A,
-            self._lora_B,
+            A,
+            B,
             self.input_low,
             self.input_range,
             self.level_low,

@@ -17,6 +17,7 @@ import random
 import shutil
 import subprocess
 import sys
+import re
 from collections import OrderedDict
 from contextlib import redirect_stderr
 from contextlib import redirect_stdout
@@ -35,6 +36,11 @@ from tqdm import trange
 from transformers import AutoConfig
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
+
+from lm_eval import evaluator
+from lm_eval.models.huggingface import HFLM
+
+PATTERN = re.compile(r"layers_(\d+)")
 
 
 def generate_overfit(pipeline, tokenizer, device, prefix=""):
@@ -185,20 +191,13 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def eval_on_wikitext(model_id, ckpt_dir, eval_model_seqlen=4096, dtype="bfloat16"):
-    result_path = ckpt_dir / "results.json"
-    cmd = (
-        f"lm_eval --model=hf --model_args=pretrained={model_id},"
-        f"trust_remote_code=True,nncf_ckpt_dir={ckpt_dir},"
-        f"device_map=auto,parallelize=True,dtype={dtype},max_length={eval_model_seqlen} "
-        f"--tasks=wikitext --output_path={result_path}"
-    )
-    sys.stdout.flush()
-    subprocess.run(cmd.split(" "))
-    with result_path.open("r") as f:
-        print("Parsing lm-eval results from file: ", result_path)
-        j = json.load(f)
-        return j["results"]["wikitext"]["word_perplexity,none"]
+def eval_on_wikitext(model, tokenizer, output_path, eval_model_seqlen=4096):
+    model.eval()
+    hflm = HFLM(pretrained=model, tokenizer=tokenizer, max_length=eval_model_seqlen)
+    results = evaluator.simple_evaluate(hflm, tasks="wikitext", batch_size=1, log_samples=False)['results']
+    with open(output_path, "w") as f:
+        json.dump(results, f, indent=4)
+    return results["wikitext"]["word_perplexity,none"]
 
 
 def save_checkpoint(wrapped_model, ckpt_dir, ckpt_name="nncf_checkpoint.pth"):
@@ -325,8 +324,45 @@ def get_lr(optimizer):
         return param_group["lr"]
 
 
+def activate_sub_adapter(model, search_space=None, adapter_version=None, sub_adapter_config=None):
+    quantizers = model.nncf.external_quantizers
+    quantizers_by_group = {}
+    for name, quantizer in quantizers.items():
+        layer_number = PATTERN.search(name)
+        if layer_number is None:
+            continue
+        layer_number = int(layer_number.group(1))
+        if layer_number not in quantizers_by_group:
+            quantizers_by_group[layer_number] = [quantizer]
+        else:
+            quantizers_by_group[layer_number].append(quantizer)
+
+    if sub_adapter_config is None:
+        assert search_space is not None
+    else:
+        assert isinstance(sub_adapter_config, List) and len(sub_adapter_config) == len(quantizers_by_group)
+
+    for layer, group in quantizers_by_group.items():
+        if sub_adapter_config is not None:
+            sub_rank = sub_adapter_config[layer]
+        elif adapter_version is not None:
+            if adapter_version == "maximal":
+                sub_rank = search_space[0]
+            elif adapter_version == "heuristic":
+                sub_rank = search_space[(len(search_space) - 1) // 2]
+            elif adapter_version == "minimal":
+                sub_rank = search_space[-1]
+            else:
+                raise ValueError("Invalid adapter version")
+        else:
+            sub_rank = random.choice(search_space)
+        for quantizer in group:
+            quantizer.activate_sub_adapter(sub_rank)
+
+
 def finetune(
     model_to_tune,
+    tokenizer,
     train_loader,
     orig_hiddens,
     args,
@@ -334,6 +370,8 @@ def finetune(
     ckpt_dir=None,
     lm_head=None,
     init_ppl=None,
+    use_nls=False,
+    nls_search_space=None
 ):
     torch_dtype = getattr(torch, args.finetune_dtype)
     if init_ppl is None:
@@ -379,6 +417,10 @@ def finetune(
         batch_indices_epoch = torch.randperm(num_samples)[:epoch_samples].chunk(microbatches_per_epoch)
 
         for batch_indices in tqdm(batch_indices_epoch, desc=f"Train epoch {epoch}", leave=False):
+            # neural lora search
+            if use_nls and metadata["grad_steps_accumulated"] == 0:
+                activate_sub_adapter(model_to_tune, search_space=nls_search_space)
+            
             batch_indices = batch_indices.tolist()
             metadata["microbatches_since_epoch_start"] += 1
             metadata["total_microbatches"] += 1
@@ -466,7 +508,10 @@ def finetune(
                 mlflow.log_metrics(log_data, step=metadata["total_microbatches"])
 
         save_checkpoint(model_to_tune, last_dir, ckpt_name)
-        word_ppl = eval_on_wikitext(args.base_model, last_dir, args.eval_model_seqlen, args.finetune_dtype)
+        if use_nls:
+            # heuristic sub-adapter
+            activate_sub_adapter(model_to_tune, search_space=nls_search_space, adapter_version="heuristic")
+        word_ppl = eval_on_wikitext(model_to_tune, tokenizer, os.path.join(last_dir, "results.json"), args.eval_model_seqlen)
         print(word_ppl)
         metadata["lm_eval_word_ppl_no_init"] = metadata["lm_eval_word_ppl"] = word_ppl
         if word_ppl < metadata["best_eval_perplexity"]:
@@ -619,6 +664,17 @@ def get_argument_parser():
         action="store_true",
         help="Whether to trust remote code.",
     )
+    parser.add_argument(
+        "--use_nls",
+        action="store_true",
+        help="Whether to apply NLS (Neural Low-rank Adapter Search / Elastic LoRA) algorithm.",
+    )
+    parser.add_argument(
+        "--nls_search_space",
+        type=int,
+        nargs='+',
+        default=None
+    )
     return parser
 
 
@@ -647,12 +703,6 @@ def main(argv):
         pprint.pprint(vars(args))
         if args.mlflow:
             mlflow.set_experiment("Tune FQLoRA")
-
-        init_ppl = None
-        init_ppl = eval_on_wikitext(
-            args.base_model, Path(args.nncf_ckpt_dir), args.eval_model_seqlen, args.finetune_dtype
-        )
-        print("word ppl for int4 init", init_ppl)
 
         # get data
         train_dataloader = get_loaders(
@@ -689,6 +739,10 @@ def main(argv):
         print("NNCF model device=", quant_model.device)
         if not args.device_map:
             quant_model = quant_model.to(device)
+        
+        init_ppl = None
+        init_ppl = eval_on_wikitext(quant_model, tokenizer, os.path.join(args.nncf_ckpt_dir, "results.json"), args.eval_model_seqlen)
+        print("word ppl for int4 init", init_ppl)
 
         with mlflow.start_run(run_name=exp_name) as run:
             try:
@@ -696,6 +750,7 @@ def main(argv):
                 mlflow.log_params(vars(args))
                 finetune(
                     quant_model,
+                    tokenizer,
                     train_loader=train_dataloader,
                     orig_hiddens=orig_hiddens,
                     args=args,
@@ -703,6 +758,8 @@ def main(argv):
                     ckpt_dir=ckpt_dir,
                     lm_head=lm_head,
                     init_ppl=init_ppl,
+                    use_nls=args.use_nls,
+                    nls_search_space=args.nls_search_space,
                 )
             finally:
                 print_memory_stats()
